@@ -1,81 +1,40 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
-import 'dart:async';
-// Mengimpor paket intl dengan prefix 'intl' untuk menghindari ambiguitas
-import 'package:intl/intl.dart' as intl;
-// Import yang dibutuhkan untuk komunikasi serial
 import 'package:flutter_libserialport/flutter_libserialport.dart';
+import 'package:intl/intl.dart' as intl;
 
-// Konstanta jumlah relay, diletakkan di atas agar mudah diakses
+// Konstanta
 const int NUM_RELAYS = 8;
+final Map<int, int> relayPinMapping = {
+  1: 2,
+  2: 3,
+  3: 4,
+  4: 5,
+  5: 6,
+  6: 7,
+  7: 8,
+  8: 9,
+};
 
-// Enum untuk status relay agar kode lebih mudah dibaca
+// State Model
 enum RelayStatus { Off, On, Timer }
 
-// Kelas untuk menyimpan state setiap relay
 class RelayData {
   final int id;
   RelayStatus status;
   int remainingTimeSeconds;
   DateTime? timerEndTime;
+  bool fiveMinuteWarningSent;
 
   RelayData({
     required this.id,
     this.status = RelayStatus.Off,
     this.remainingTimeSeconds = 0,
     this.timerEndTime,
+    this.fiveMinuteWarningSent = false,
   });
-
-  // Factory untuk membuat RelayData dari string yang diterima dari Arduino
-  // Format: "ID,STATUS,NILAI" (Contoh: "1,TIMER,3600")
-  factory RelayData.fromString(String data) {
-    final parts = data.split(',');
-    if (parts.length != 3) {
-      throw FormatException('Format data serial tidak valid: $data');
-    }
-
-    final id = int.parse(parts[0]);
-    final statusString = parts[1].toUpperCase();
-    final value = int.parse(parts[2]);
-
-    RelayStatus status;
-    int remainingTime = 0;
-    DateTime? endTime;
-
-    switch (statusString) {
-      case "ON":
-        status = RelayStatus.On;
-        break;
-      case "OFF":
-        status = RelayStatus.Off;
-        break;
-      case "TIMER":
-        status = RelayStatus.Timer;
-        remainingTime = value;
-        // Jika value > 0, set waktu berakhirnya
-        if (value > 0) {
-          endTime = DateTime.now().add(Duration(seconds: value));
-        }
-        break;
-      default:
-        status = RelayStatus.Off; // Default jika status tidak dikenal
-    }
-
-    return RelayData(
-      id: id,
-      status: status,
-      remainingTimeSeconds: remainingTime,
-      timerEndTime: endTime,
-    );
-  }
-
-  // Metode untuk mengupdate data relay yang sudah ada
-  void update(RelayData newData) {
-    status = newData.status;
-    remainingTimeSeconds = newData.remainingTimeSeconds;
-    timerEndTime = newData.timerEndTime;
-  }
 }
 
 void main() {
@@ -95,9 +54,19 @@ class MyApp extends StatelessWidget {
         brightness: Brightness.dark,
         scaffoldBackgroundColor: const Color(0xFF121212),
         cardTheme: CardThemeData(
-          elevation: 2,
+          elevation: 4,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+        dialogTheme: DialogThemeData(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+        elevatedButtonTheme: ElevatedButtonThemeData(
+          style: ElevatedButton.styleFrom(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           ),
         ),
       ),
@@ -114,28 +83,31 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
+  // Serial Port State
   List<String> _availablePorts = [];
   SerialPort? _port;
-  late SerialPortReader _reader;
+  StreamSubscription<Uint8List>? _serialSubscription;
   bool _isConnected = false;
+
+  // App State
+  final Map<int, RelayData> _relayStates = {};
+  Timer? _logicTimer;
   final ScrollController _logScrollController = ScrollController();
   String _logMessages = '';
-
-  final Map<int, RelayData> _relayStates = {};
-  Timer? _uiUpdateTimer;
 
   @override
   void initState() {
     super.initState();
     _initRelayStates();
     _initPorts();
-    _startUiUpdateTimer();
+    _startLogicTimer();
   }
 
   @override
   void dispose() {
     _disconnectSerialPort();
-    _uiUpdateTimer?.cancel();
+    _logicTimer?.cancel();
+    _logScrollController.dispose();
     super.dispose();
   }
 
@@ -145,167 +117,225 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  void _startUiUpdateTimer() {
-    _uiUpdateTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+  // --- Jantung Aplikasi: Timer yang Optimal ---
+  void _startLogicTimer() {
+    _logicTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (!mounted) return;
-      setState(() {
-        _relayStates.forEach((id, relay) {
-          if (relay.status == RelayStatus.Timer && relay.timerEndTime != null) {
-            final remaining = relay.timerEndTime!
-                .difference(DateTime.now())
-                .inSeconds;
-            relay.remainingTimeSeconds = remaining > 0 ? remaining : 0;
-            if (remaining <= 0) {
-              relay.status = RelayStatus.Off;
-              relay.timerEndTime = null;
-              _addLog('Meja $id: Timer selesai.');
-            }
+
+      final currentTime = DateTime.now();
+      final List<int> finishedTimerIds = [];
+      bool hasActiveTimers = false;
+
+      // 1. Periksa setiap relay
+      _relayStates.forEach((id, relay) {
+        if (relay.status == RelayStatus.Timer && relay.timerEndTime != null) {
+          hasActiveTimers = true;
+          final remaining = relay.timerEndTime!
+              .difference(currentTime)
+              .inSeconds;
+          relay.remainingTimeSeconds = remaining > 0 ? remaining : 0;
+
+          if (relay.remainingTimeSeconds <= 0) {
+            finishedTimerIds.add(id); // Kumpulkan ID timer yang selesai
+          } else if (relay.remainingTimeSeconds <= 300 &&
+              !relay.fiveMinuteWarningSent) {
+            _addLog('Peringatan 5 menit Meja $id. Mengirim sinyal kedip.');
+            relay.fiveMinuteWarningSent = true;
+            _sendCommand(id, "BLINK");
           }
-        });
+        }
       });
+
+      // 2. Proses semua timer yang selesai
+      if (finishedTimerIds.isNotEmpty) {
+        for (final id in finishedTimerIds) {
+          _handleTimerFinished(id);
+        }
+      }
+
+      // 3. Update UI jika diperlukan
+      if (hasActiveTimers || finishedTimerIds.isNotEmpty) {
+        setState(() {});
+      }
     });
   }
 
+  void _handleTimerFinished(int mejaId) {
+    _addLog('Waktu Meja $mejaId habis. Mereset & mematikan relay.');
+    final relay = _relayStates[mejaId]!;
+
+    // Reset state di aplikasi
+    relay.status = RelayStatus.Off;
+    relay.timerEndTime = null;
+    relay.remainingTimeSeconds = 0;
+    relay.fiveMinuteWarningSent = false;
+
+    // Kirim perintah OFF ke Arduino
+    _sendCommand(mejaId, "0");
+  }
+
+  // --- Fungsi Komunikasi Serial ---
   void _initPorts() {
     setState(() => _availablePorts = SerialPort.availablePorts);
   }
 
   Future<void> _connectSerialPort(String portName) async {
-    _disconnectSerialPort(); // Pastikan port lama sudah ditutup
-    setState(() {
-      _port = SerialPort(portName);
-    });
-
+    await _disconnectSerialPort();
+    _port = SerialPort(portName);
     try {
       if (!_port!.openReadWrite()) {
-        throw SerialPortError("Gagal membuka port: ${SerialPort.lastError}");
+        throw SerialPortError(
+          "Gagal membuka port: ${SerialPort.lastError?.toString()}",
+        );
       }
-
       _port!.config = SerialPortConfig()
+        // !!! PERBAIKAN KRUSIAL DI SINI !!!
         ..baudRate = 9600
         ..bits = 8
         ..stopBits = 1
         ..parity = SerialPortParity.none;
 
-      _reader = SerialPortReader(_port!);
-      _listenForSerialData();
-
-      setState(() {
-        _isConnected = true;
+      final reader = SerialPortReader(_port!);
+      _serialSubscription = reader.stream.listen((data) {
+        final response = String.fromCharCodes(data).trim();
+        if (response.isNotEmpty) {
+          _addLog('Arduino: $response');
+        }
       });
-      _addLog('Berhasil terhubung ke ${portName}');
-      _sendCommand(0, 'STATUS', 0); // Minta status awal dari semua relay
+
+      setState(() => _isConnected = true);
+      _addLog('Berhasil terhubung ke $portName');
     } on SerialPortError catch (e) {
       _addLog('Gagal terhubung: ${e.message}');
-      _disconnectSerialPort();
+      await _disconnectSerialPort();
     }
   }
 
-  void _disconnectSerialPort() {
-    if (_port != null) {
+  Future<void> _disconnectSerialPort() async {
+    await _serialSubscription?.cancel();
+    _serialSubscription = null;
+    if (_port != null && _port!.isOpen) {
       _port!.close();
-      _port!.dispose();
+      //_port!.dispose(); // Note: dispose bisa menyebabkan error di beberapa platform
       _port = null;
-      setState(() {
-        _isConnected = false;
-      });
+    }
+    if (mounted) {
+      setState(() => _isConnected = false);
       _addLog('Koneksi terputus.');
     }
   }
 
-  void _listenForSerialData() {
-    _reader.stream.listen(
-      (data) {
-        final receivedString = String.fromCharCodes(data).trim();
-        if (receivedString.isNotEmpty) {
-          _addLog('Diterima: $receivedString');
-          try {
-            final newRelayData = RelayData.fromString(receivedString);
-            if (_relayStates.containsKey(newRelayData.id)) {
-              setState(() {
-                _relayStates[newRelayData.id]!.update(newRelayData);
-              });
-            }
-          } catch (e) {
-            _addLog('Error parsing data: $e - Data: "$receivedString"');
-          }
-        }
-      },
-      onError: (error) {
-        _addLog('Serial read error: $error');
-        _disconnectSerialPort();
-      },
-      onDone: () {
-        _disconnectSerialPort();
-      },
-    );
-  }
-
-  Future<void> _sendCommand(int mejaId, String action, int value) async {
+  Future<void> _sendCommand(int mejaId, String action) async {
     if (!_isConnected || _port == null) {
-      _addLog('Tidak terhubung ke Arduino.');
+      _addLog('Error: Tidak terhubung ke Arduino.');
       return;
     }
-
-    final command = '$mejaId,$action,$value\n';
+    final int? pin = relayPinMapping[mejaId];
+    if (pin == null) {
+      _addLog('Error: Mapping pin untuk meja $mejaId tidak ditemukan.');
+      return;
+    }
+    final command = '$pin,$action\n';
     try {
-      final bytesWritten = _port!.write(Uint8List.fromList(command.codeUnits));
-      if (bytesWritten != command.length) {
-        _addLog('Error: Gagal mengirim seluruh data. Terkirim: $bytesWritten');
-      }
-      _addLog('Mengirim: $command');
+      _port!.write(Uint8List.fromList(command.codeUnits));
+      _addLog('Mengirim: ${command.trim()}\\n');
     } on SerialPortError catch (e) {
       _addLog('Error mengirim perintah: ${e.message}');
     }
   }
 
+  // --- Fungsi Aksi & UI ---
   void _addLog(String message) {
     if (!mounted) return;
     setState(() {
-      // PERBAIKAN: Menggunakan prefix 'intl' untuk memanggil DateFormat
-      _logMessages =
-          '${intl.DateFormat('HH:mm:ss').format(DateTime.now())} - $message\n$_logMessages';
-      if (_logMessages.length > 2000) {
-        _logMessages = _logMessages.substring(0, 2000);
+      final timestamp = intl.DateFormat('HH:mm:ss').format(DateTime.now());
+      _logMessages = '$timestamp - $message\n$_logMessages';
+      if (_logMessages.length > 3000) {
+        // Increased log size
+        _logMessages = _logMessages.substring(0, 3000);
       }
     });
-    // Auto-scroll log
     if (_logScrollController.hasClients) {
-      _logScrollController.animateTo(
-        0,
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeOut,
-      );
+      _logScrollController.jumpTo(0);
     }
   }
 
+  void _turnOnRelay(int mejaId) {
+    _addLog('Meja $mejaId: Mode Personal (ON)');
+    setState(() {
+      _relayStates[mejaId]!.status = RelayStatus.On;
+      _relayStates[mejaId]!.timerEndTime = null;
+      _relayStates[mejaId]!.fiveMinuteWarningSent = false;
+    });
+    _sendCommand(mejaId, "1");
+  }
+
+  void _turnOffRelay(int mejaId) {
+    _addLog('Meja $mejaId: Dimatikan (OFF)');
+    setState(() {
+      _relayStates[mejaId]!.status = RelayStatus.Off;
+      _relayStates[mejaId]!.timerEndTime = null;
+      _relayStates[mejaId]!.fiveMinuteWarningSent = false;
+    });
+    _sendCommand(mejaId, "0");
+  }
+
+  void _startTimer(int mejaId, int totalSeconds) {
+    _addLog('Meja $mejaId: Timer dimulai (${_formatTime(totalSeconds)})');
+    setState(() {
+      final relay = _relayStates[mejaId]!;
+      relay.status = RelayStatus.Timer;
+      relay.timerEndTime = DateTime.now().add(Duration(seconds: totalSeconds));
+      relay.remainingTimeSeconds = totalSeconds;
+      relay.fiveMinuteWarningSent = false;
+    });
+    _sendCommand(mejaId, "1");
+  }
+
   Future<void> _showSetTimerDialog(int mejaId) async {
-    final timerController = TextEditingController();
+    final hoursController = TextEditingController();
+    final minutesController = TextEditingController();
     return showDialog<void>(
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
           title: Text('Atur Timer Meja $mejaId'),
-          content: TextField(
-            controller: timerController,
-            keyboardType: TextInputType.number,
-            autofocus: true,
-            decoration: const InputDecoration(
-              labelText: 'Durasi (detik)',
-              hintText: 'Contoh: 3600 (untuk 1 jam)',
-            ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: hoursController,
+                keyboardType: TextInputType.number,
+                autofocus: true,
+                decoration: const InputDecoration(
+                  labelText: 'Jam',
+                  hintText: 'Contoh: 1',
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: minutesController,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'Menit',
+                  hintText: 'Contoh: 30',
+                ),
+              ),
+            ],
           ),
           actions: <Widget>[
             TextButton(
               child: const Text('Batal'),
               onPressed: () => Navigator.of(context).pop(),
             ),
-            TextButton(
-              child: const Text('Atur'),
+            ElevatedButton(
+              child: const Text('Atur Timer'),
               onPressed: () {
-                final duration = int.tryParse(timerController.text);
-                if (duration != null && duration > 0) {
-                  _sendCommand(mejaId, 'TIMER', duration);
+                final hours = int.tryParse(hoursController.text) ?? 0;
+                final minutes = int.tryParse(minutesController.text) ?? 0;
+                final totalSeconds = (hours * 3600) + (minutes * 60);
+                if (totalSeconds > 0) {
+                  _startTimer(mejaId, totalSeconds);
                   Navigator.of(context).pop();
                 } else {
                   _addLog('Input durasi tidak valid.');
@@ -331,16 +361,16 @@ class _HomePageState extends State<HomePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Kontrol Relay (USB)'),
+        title: const Text('Kontrol Relay Billiard'),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
-            onPressed: _initPorts,
+            onPressed: _isConnected ? null : _initPorts,
             tooltip: 'Refresh Port List',
           ),
           if (!_isConnected)
             DropdownButton<String>(
-              value: _port?.name,
+              value: null,
               hint: const Text('Pilih Port'),
               items: _availablePorts.map<DropdownMenuItem<String>>((
                 String port,
@@ -348,9 +378,7 @@ class _HomePageState extends State<HomePage> {
                 return DropdownMenuItem<String>(value: port, child: Text(port));
               }).toList(),
               onChanged: (String? newValue) {
-                if (newValue != null) {
-                  _connectSerialPort(newValue);
-                }
+                if (newValue != null) _connectSerialPort(newValue);
               },
             ),
           const SizedBox(width: 10),
@@ -358,17 +386,19 @@ class _HomePageState extends State<HomePage> {
             ElevatedButton.icon(
               onPressed: _disconnectSerialPort,
               icon: const Icon(Icons.close),
-              label: const Text('Disconnect'),
+              label: Text('Disconnect ${_port?.name ?? ""}'),
               style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
             ),
           const SizedBox(width: 10),
         ],
       ),
-      body: Row(
+      // --- PERUBAHAN TATA LETAK UTAMA DIMULAI DI SINI ---
+      body: Column(
+        // 1. Diubah dari Row ke Column
         children: [
-          // Kolom utama untuk kartu relay
           Expanded(
-            flex: 3,
+            // 2. Panel GridView (atas) mengambil 95% layar
+            flex: 9, // = 95%
             child: Padding(
               padding: const EdgeInsets.all(8.0),
               child: GridView.builder(
@@ -387,7 +417,7 @@ class _HomePageState extends State<HomePage> {
 
                   switch (relay.status) {
                     case RelayStatus.On:
-                      statusText = 'ON';
+                      statusText = 'ON (Personal)';
                       cardColor = Colors.green.shade900;
                       break;
                     case RelayStatus.Off:
@@ -397,7 +427,11 @@ class _HomePageState extends State<HomePage> {
                     case RelayStatus.Timer:
                       statusText =
                           'TIMER: ${_formatTime(relay.remainingTimeSeconds)}';
-                      cardColor = Colors.orange.shade900;
+                      cardColor =
+                          relay.remainingTimeSeconds <= 300 &&
+                              relay.remainingTimeSeconds > 0
+                          ? Colors.deepPurple.shade900
+                          : Colors.orange.shade900;
                       break;
                   }
 
@@ -423,19 +457,22 @@ class _HomePageState extends State<HomePage> {
                             children: [
                               IconButton(
                                 icon: const Icon(Icons.power_settings_new),
-                                color: Colors.red,
+                                color: Colors.redAccent,
+                                iconSize: 30,
                                 tooltip: 'Matikan',
-                                onPressed: () => _sendCommand(mejaId, 'OFF', 0),
+                                onPressed: () => _turnOffRelay(mejaId),
                               ),
                               IconButton(
                                 icon: const Icon(Icons.play_arrow),
-                                color: Colors.green,
-                                tooltip: 'Nyalakan',
-                                onPressed: () => _sendCommand(mejaId, 'ON', 0),
+                                color: Colors.lightGreenAccent,
+                                iconSize: 30,
+                                tooltip: 'Nyalakan (Personal)',
+                                onPressed: () => _turnOnRelay(mejaId),
                               ),
                               IconButton(
                                 icon: const Icon(Icons.timer),
-                                color: Colors.orange,
+                                color: Colors.orangeAccent,
+                                iconSize: 30,
                                 tooltip: 'Set Timer',
                                 onPressed: () => _showSetTimerDialog(mejaId),
                               ),
@@ -449,11 +486,11 @@ class _HomePageState extends State<HomePage> {
               ),
             ),
           ),
-          // Kolom untuk log
+          // 3. Panel Log (bawah) mengambil 5% layar
           Expanded(
-            flex: 2,
+            flex: 1, // = 5%
             child: Container(
-              color: Colors.black.withOpacity(0.3),
+              color: Colors.black.withOpacity(0.5),
               padding: const EdgeInsets.all(8.0),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -463,7 +500,10 @@ class _HomePageState extends State<HomePage> {
                     children: [
                       const Text(
                         'Log Komunikasi',
-                        style: TextStyle(fontWeight: FontWeight.bold),
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                        ),
                       ),
                       TextButton(
                         onPressed: () => setState(() => _logMessages = ''),
@@ -471,16 +511,19 @@ class _HomePageState extends State<HomePage> {
                       ),
                     ],
                   ),
-                  const Divider(),
+                  const Divider(height: 1),
                   Expanded(
                     child: SingleChildScrollView(
                       controller: _logScrollController,
-                      reverse: true, // Agar log terbaru di bawah
-                      child: Text(
-                        _logMessages,
-                        style: const TextStyle(
-                          fontFamily: 'monospace',
-                          fontSize: 12,
+                      reverse: true,
+                      child: Padding(
+                        padding: const EdgeInsets.only(top: 4.0),
+                        child: Text(
+                          _logMessages,
+                          style: const TextStyle(
+                            fontFamily: 'monospace',
+                            fontSize: 10, // Font diperkecil agar muat
+                          ),
                         ),
                       ),
                     ),
