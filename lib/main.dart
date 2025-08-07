@@ -1,9 +1,17 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_libserialport/flutter_libserialport.dart';
 import 'package:intl/intl.dart' as intl;
+import 'package:putra_jaya_billiard/firebase_options.dart';
+import 'package:putra_jaya_billiard/reports_page.dart';
+import 'package:putra_jaya_billiard/settings_page.dart';
+import 'package:putra_jaya_billiard/transactions_page.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:sliding_up_panel/sliding_up_panel.dart';
 
 // Konstanta
 const int NUM_RELAYS = 8;
@@ -19,7 +27,7 @@ final Map<int, int> relayPinMapping = {
 };
 
 // State Model
-enum RelayStatus { Off, On, Timer }
+enum RelayStatus { Off, On, Timer, TimeUp }
 
 class RelayData {
   final int id;
@@ -37,7 +45,38 @@ class RelayData {
   });
 }
 
-void main() {
+// Model untuk Transaksi Firebase
+class BillingTransaction {
+  final int tableId;
+  final DateTime startTime;
+  final DateTime endTime;
+  final int durationInSeconds;
+  final double totalCost;
+
+  BillingTransaction({
+    required this.tableId,
+    required this.startTime,
+    required this.endTime,
+    required this.durationInSeconds,
+    required this.totalCost,
+  });
+
+  Map<String, dynamic> toMap() {
+    return {
+      'tableId': tableId,
+      'startTime': startTime,
+      'endTime': endTime,
+      'durationInSeconds': durationInSeconds,
+      'totalCost': totalCost,
+      'createdAt': FieldValue.serverTimestamp(),
+    };
+  }
+}
+
+// Fungsi main untuk inisialisasi Firebase
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   runApp(const MyApp());
 }
 
@@ -47,7 +86,8 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Arduino Relay Control',
+      title: 'Putra Jaya Billiard',
+      debugShowCheckedModeBanner: false,
       theme: ThemeData(
         primarySwatch: Colors.teal,
         useMaterial3: true,
@@ -95,12 +135,18 @@ class _HomePageState extends State<HomePage> {
   final ScrollController _logScrollController = ScrollController();
   String _logMessages = '';
 
+  // State untuk Kasir & Harga
+  final Map<int, DateTime> _activeSessions = {};
+  double _ratePerHour = 0.0;
+  double _ratePerMinute = 0.0;
+
   @override
   void initState() {
     super.initState();
     _initRelayStates();
     _initPorts();
     _startLogicTimer();
+    _loadRates();
   }
 
   @override
@@ -111,70 +157,200 @@ class _HomePageState extends State<HomePage> {
     super.dispose();
   }
 
+  Future<void> _loadRates() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _ratePerHour = prefs.getDouble('ratePerHour') ?? 50000.0;
+      _ratePerMinute = prefs.getDouble('ratePerMinute') ?? 0;
+    });
+    _addLog('Harga dimuat: Rp$_ratePerHour/jam, Rp$_ratePerMinute/menit');
+  }
+
   void _initRelayStates() {
     for (int i = 1; i <= NUM_RELAYS; i++) {
       _relayStates[i] = RelayData(id: i);
     }
   }
 
-  // --- Jantung Aplikasi: Timer yang Optimal ---
   void _startLogicTimer() {
     _logicTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (!mounted) return;
 
       final currentTime = DateTime.now();
-      final List<int> finishedTimerIds = [];
-      bool hasActiveTimers = false;
+      final Set<int> newlyFinishedTimerIds = {};
+      bool uiNeedsUpdate = false;
 
-      // 1. Periksa setiap relay
       _relayStates.forEach((id, relay) {
         if (relay.status == RelayStatus.Timer && relay.timerEndTime != null) {
-          hasActiveTimers = true;
+          uiNeedsUpdate = true;
           final remaining = relay.timerEndTime!
               .difference(currentTime)
               .inSeconds;
-          relay.remainingTimeSeconds = remaining > 0 ? remaining : 0;
 
-          if (relay.remainingTimeSeconds <= 0) {
-            finishedTimerIds.add(id); // Kumpulkan ID timer yang selesai
-          } else if (relay.remainingTimeSeconds <= 300 &&
-              !relay.fiveMinuteWarningSent) {
-            _addLog('Peringatan 5 menit Meja $id. Mengirim sinyal kedip.');
-            relay.fiveMinuteWarningSent = true;
-            _sendCommand(id, "BLINK");
+          if (remaining <= 0) {
+            relay.remainingTimeSeconds = 0;
+            relay.status = RelayStatus.TimeUp;
+            relay.timerEndTime = null;
+            newlyFinishedTimerIds.add(id);
+          } else {
+            relay.remainingTimeSeconds = remaining;
+            if (remaining <= 300 && !relay.fiveMinuteWarningSent) {
+              _addLog('Peringatan 5 menit Meja $id. Mengirim sinyal kedip.');
+              relay.fiveMinuteWarningSent = true;
+              _sendCommand(id, "BLINK");
+            }
           }
         }
       });
 
-      // 2. Proses semua timer yang selesai
-      if (finishedTimerIds.isNotEmpty) {
-        for (final id in finishedTimerIds) {
-          _handleTimerFinished(id);
+      if (newlyFinishedTimerIds.isNotEmpty) {
+        for (final id in newlyFinishedTimerIds) {
+          _addLog('Waktu Meja $id HABIS. Menunggu pembayaran.');
+          _sendCommand(id, "0");
         }
       }
 
-      // 3. Update UI jika diperlukan
-      if (hasActiveTimers || finishedTimerIds.isNotEmpty) {
+      if (uiNeedsUpdate) {
         setState(() {});
       }
     });
   }
 
-  void _handleTimerFinished(int mejaId) {
-    _addLog('Waktu Meja $mejaId habis. Mereset & mematikan relay.');
-    final relay = _relayStates[mejaId]!;
+  void _startBillingSession(int mejaId) {
+    if (_activeSessions.containsKey(mejaId)) {
+      _addLog('Info: Meja $mejaId sudah memiliki sesi aktif.');
+      return;
+    }
+    setState(() {
+      _activeSessions[mejaId] = DateTime.now();
+    });
+    _addLog('Sesi billing Meja $mejaId dimulai.');
+  }
 
-    // Reset state di aplikasi
-    relay.status = RelayStatus.Off;
-    relay.timerEndTime = null;
-    relay.remainingTimeSeconds = 0;
-    relay.fiveMinuteWarningSent = false;
+  Future<void> _finalizeAndSaveBill(int mejaId) async {
+    final startTime = _activeSessions[mejaId];
+    if (startTime == null) {
+      _addLog(
+        'Peringatan: Sesi Meja $mejaId tidak ditemukan untuk difinalisasi.',
+      );
+      _setRelayStateToOff(mejaId);
+      return;
+    }
 
-    // Kirim perintah OFF ke Arduino
+    final endTime = DateTime.now();
+    final duration = endTime.difference(startTime);
+    final hours = duration.inHours;
+    final minutes = duration.inMinutes.remainder(60);
+    final cost = (hours * _ratePerHour) + (minutes * _ratePerMinute);
+
+    _addLog(
+      'Sesi Meja $mejaId selesai. Durasi: ${duration.inMinutes} menit. Biaya: Rp${cost.toStringAsFixed(0)}',
+    );
+
+    final transaction = BillingTransaction(
+      tableId: mejaId,
+      startTime: startTime,
+      endTime: endTime,
+      durationInSeconds: duration.inSeconds,
+      totalCost: cost,
+    );
+
+    try {
+      await FirebaseFirestore.instance
+          .collection('transactions')
+          .add(transaction.toMap());
+      _addLog('Transaksi Meja $mejaId berhasil disimpan ke Firebase.');
+    } catch (e) {
+      _addLog('Error menyimpan ke Firebase: $e');
+    }
+
+    setState(() {
+      _activeSessions.remove(mejaId);
+    });
+
+    _setRelayStateToOff(mejaId);
+  }
+
+  Future<void> _showConfirmationDialog(int mejaId) async {
+    final startTime = _activeSessions[mejaId];
+    if (startTime == null) return;
+
+    final duration = DateTime.now().difference(startTime);
+    final hours = duration.inHours;
+    final minutes = duration.inMinutes.remainder(60);
+    final finalCost = (hours * _ratePerHour) + (minutes * _ratePerMinute);
+
+    String formatCurrency(double amount) {
+      final format = intl.NumberFormat.currency(
+        locale: 'id_ID',
+        symbol: 'Rp ',
+        decimalDigits: 0,
+      );
+      return format.format(amount);
+    }
+
+    return showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Text('Konfirmasi Pembayaran Meja $mejaId'),
+          content: SingleChildScrollView(
+            child: ListBody(
+              children: <Widget>[
+                Text('Durasi Main: ${_formatTime(duration.inSeconds)}'),
+                const SizedBox(height: 12),
+                Text(
+                  'Total Tagihan: ${formatCurrency(finalCost)}',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 18,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: <Widget>[
+            TextButton(
+              child: const Text('Batal'),
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.teal),
+              child: const Text('Konfirmasi & Bayar'),
+              onPressed: () {
+                Navigator.of(context).pop();
+                _finalizeAndSaveBill(mejaId);
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _setRelayStateToOff(int mejaId) {
+    _addLog('Meja $mejaId: Relay dimatikan.');
+    setState(() {
+      _relayStates[mejaId]!.status = RelayStatus.Off;
+      _relayStates[mejaId]!.timerEndTime = null;
+      _relayStates[mejaId]!.fiveMinuteWarningSent = false;
+    });
     _sendCommand(mejaId, "0");
   }
 
-  // --- Fungsi Komunikasi Serial ---
+  void _cancelSessionAndTurnOff(int mejaId) {
+    if (_activeSessions.containsKey(mejaId)) {
+      _addLog('Sesi Meja $mejaId DIBATALKAN tanpa transaksi.');
+      setState(() {
+        _activeSessions.remove(mejaId);
+      });
+    }
+    _setRelayStateToOff(mejaId);
+  }
+
   void _initPorts() {
     setState(() => _availablePorts = SerialPort.availablePorts);
   }
@@ -189,8 +365,8 @@ class _HomePageState extends State<HomePage> {
         );
       }
       _port!.config = SerialPortConfig()
-        // !!! PERBAIKAN KRUSIAL DI SINI !!!
-        ..baudRate = 9600
+        ..baudRate =
+            9600 // Pastikan ini sesuai dengan hardware Anda
         ..bits = 8
         ..stopBits = 1
         ..parity = SerialPortParity.none;
@@ -216,7 +392,6 @@ class _HomePageState extends State<HomePage> {
     _serialSubscription = null;
     if (_port != null && _port!.isOpen) {
       _port!.close();
-      //_port!.dispose(); // Note: dispose bisa menyebabkan error di beberapa platform
       _port = null;
     }
     if (mounted) {
@@ -244,14 +419,12 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  // --- Fungsi Aksi & UI ---
   void _addLog(String message) {
     if (!mounted) return;
     setState(() {
       final timestamp = intl.DateFormat('HH:mm:ss').format(DateTime.now());
       _logMessages = '$timestamp - $message\n$_logMessages';
       if (_logMessages.length > 3000) {
-        // Increased log size
         _logMessages = _logMessages.substring(0, 3000);
       }
     });
@@ -261,6 +434,7 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _turnOnRelay(int mejaId) {
+    if (_activeSessions.containsKey(mejaId)) return; // Cegah mulai ganda
     _addLog('Meja $mejaId: Mode Personal (ON)');
     setState(() {
       _relayStates[mejaId]!.status = RelayStatus.On;
@@ -268,19 +442,11 @@ class _HomePageState extends State<HomePage> {
       _relayStates[mejaId]!.fiveMinuteWarningSent = false;
     });
     _sendCommand(mejaId, "1");
-  }
-
-  void _turnOffRelay(int mejaId) {
-    _addLog('Meja $mejaId: Dimatikan (OFF)');
-    setState(() {
-      _relayStates[mejaId]!.status = RelayStatus.Off;
-      _relayStates[mejaId]!.timerEndTime = null;
-      _relayStates[mejaId]!.fiveMinuteWarningSent = false;
-    });
-    _sendCommand(mejaId, "0");
+    _startBillingSession(mejaId);
   }
 
   void _startTimer(int mejaId, int totalSeconds) {
+    if (_activeSessions.containsKey(mejaId)) return; // Cegah mulai ganda
     _addLog('Meja $mejaId: Timer dimulai (${_formatTime(totalSeconds)})');
     setState(() {
       final relay = _relayStates[mejaId]!;
@@ -290,9 +456,14 @@ class _HomePageState extends State<HomePage> {
       relay.fiveMinuteWarningSent = false;
     });
     _sendCommand(mejaId, "1");
+    _startBillingSession(mejaId);
   }
 
   Future<void> _showSetTimerDialog(int mejaId) async {
+    if (_activeSessions.containsKey(mejaId)) {
+      _addLog("Error: Meja $mejaId sudah aktif.");
+      return;
+    }
     final hoursController = TextEditingController();
     final minutesController = TextEditingController();
     return showDialog<void>(
@@ -359,10 +530,47 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
+    final screenHeight = MediaQuery.of(context).size.height;
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Kontrol Relay Billiard'),
+        title: const Text('Putra Jaya Billiard'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.history),
+            tooltip: 'Riwayat Transaksi',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const TransactionsPage(),
+                ),
+              );
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.bar_chart),
+            tooltip: 'Laporan Pendapatan',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const ReportsPage()),
+              );
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.settings),
+            tooltip: 'Pengaturan Harga',
+            onPressed: () async {
+              final settingsChanged = await Navigator.push<bool>(
+                context,
+                MaterialPageRoute(builder: (context) => const SettingsPage()),
+              );
+              if (settingsChanged == true) {
+                _loadRates();
+              }
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: _isConnected ? null : _initPorts,
@@ -392,147 +600,180 @@ class _HomePageState extends State<HomePage> {
           const SizedBox(width: 10),
         ],
       ),
-      // --- PERUBAHAN TATA LETAK UTAMA DIMULAI DI SINI ---
-      body: Column(
-        // 1. Diubah dari Row ke Column
-        children: [
-          Expanded(
-            // 2. Panel GridView (atas) mengambil 95% layar
-            flex: 9, // = 95%
-            child: Padding(
-              padding: const EdgeInsets.all(8.0),
-              child: GridView.builder(
-                gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                  maxCrossAxisExtent: 400,
-                  childAspectRatio: 1.8,
-                  crossAxisSpacing: 10,
-                  mainAxisSpacing: 10,
-                ),
-                itemCount: NUM_RELAYS,
-                itemBuilder: (context, index) {
-                  final mejaId = index + 1;
-                  final relay = _relayStates[mejaId]!;
-                  String statusText;
-                  Color cardColor;
+      body: SlidingUpPanel(
+        body: Padding(
+          padding: const EdgeInsets.all(8.0),
+          child: GridView.builder(
+            gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+              maxCrossAxisExtent: 400,
+              childAspectRatio: 1.6,
+              crossAxisSpacing: 10,
+              mainAxisSpacing: 10,
+            ),
+            itemCount: NUM_RELAYS,
+            itemBuilder: (context, index) {
+              final mejaId = index + 1;
+              final relay = _relayStates[mejaId]!;
+              final bool isSessionActive = _activeSessions.containsKey(mejaId);
+              String statusText;
+              Color cardColor;
 
-                  switch (relay.status) {
-                    case RelayStatus.On:
-                      statusText = 'ON (Personal)';
-                      cardColor = Colors.green.shade900;
-                      break;
-                    case RelayStatus.Off:
-                      statusText = 'OFF';
-                      cardColor = Colors.grey.shade800;
-                      break;
-                    case RelayStatus.Timer:
-                      statusText =
-                          'TIMER: ${_formatTime(relay.remainingTimeSeconds)}';
-                      cardColor =
-                          relay.remainingTimeSeconds <= 300 &&
-                              relay.remainingTimeSeconds > 0
-                          ? Colors.deepPurple.shade900
-                          : Colors.orange.shade900;
-                      break;
-                  }
+              switch (relay.status) {
+                case RelayStatus.On:
+                  statusText = 'ON (Personal)';
+                  cardColor = Colors.green.shade900;
+                  break;
+                case RelayStatus.Off:
+                  statusText = 'OFF';
+                  cardColor = Colors.grey.shade800;
+                  break;
+                case RelayStatus.Timer:
+                  statusText =
+                      'TIMER: ${_formatTime(relay.remainingTimeSeconds)}';
+                  cardColor =
+                      relay.remainingTimeSeconds <= 300 &&
+                          relay.remainingTimeSeconds > 0
+                      ? Colors.deepPurple.shade900
+                      : Colors.orange.shade900;
+                  break;
+                case RelayStatus.TimeUp:
+                  statusText = 'WAKTU HABIS';
+                  cardColor = Colors.red.shade900;
+                  break;
+              }
 
-                  return Card(
-                    color: cardColor,
-                    child: Padding(
-                      padding: const EdgeInsets.all(12.0),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              return Card(
+                color: cardColor,
+                child: Padding(
+                  padding: const EdgeInsets.all(12.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Meja $mejaId',
+                        style: Theme.of(context).textTheme.headlineSmall,
+                      ),
+                      Text(
+                        'Status: $statusText',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      const Spacer(),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
                         children: [
-                          Text(
-                            'Meja $mejaId',
-                            style: Theme.of(context).textTheme.headlineSmall,
+                          IconButton(
+                            icon: const Icon(Icons.power_settings_new),
+                            color: Colors.redAccent,
+                            iconSize: 30,
+                            tooltip: 'Matikan (Batalkan Sesi)',
+                            onPressed: () => _cancelSessionAndTurnOff(mejaId),
                           ),
-                          Text(
-                            'Status: $statusText',
-                            style: Theme.of(context).textTheme.titleMedium,
+                          IconButton(
+                            icon: const Icon(Icons.play_arrow),
+                            color: Colors.lightGreenAccent,
+                            iconSize: 30,
+                            tooltip: 'Nyalakan (Personal)',
+                            onPressed: () => _turnOnRelay(mejaId),
                           ),
-                          const Spacer(),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.end,
-                            children: [
-                              IconButton(
-                                icon: const Icon(Icons.power_settings_new),
-                                color: Colors.redAccent,
-                                iconSize: 30,
-                                tooltip: 'Matikan',
-                                onPressed: () => _turnOffRelay(mejaId),
-                              ),
-                              IconButton(
-                                icon: const Icon(Icons.play_arrow),
-                                color: Colors.lightGreenAccent,
-                                iconSize: 30,
-                                tooltip: 'Nyalakan (Personal)',
-                                onPressed: () => _turnOnRelay(mejaId),
-                              ),
-                              IconButton(
-                                icon: const Icon(Icons.timer),
-                                color: Colors.orangeAccent,
-                                iconSize: 30,
-                                tooltip: 'Set Timer',
-                                onPressed: () => _showSetTimerDialog(mejaId),
-                              ),
-                            ],
+                          IconButton(
+                            icon: const Icon(Icons.timer),
+                            color: Colors.orangeAccent,
+                            iconSize: 30,
+                            tooltip: 'Set Timer',
+                            onPressed: () => _showSetTimerDialog(mejaId),
                           ),
                         ],
                       ),
-                    ),
-                  );
-                },
-              ),
-            ),
-          ),
-          // 3. Panel Log (bawah) mengambil 5% layar
-          Expanded(
-            flex: 1, // = 5%
-            child: Container(
-              color: Colors.black.withOpacity(0.5),
-              padding: const EdgeInsets.all(8.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text(
-                        'Log Komunikasi',
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 14,
-                        ),
-                      ),
-                      TextButton(
-                        onPressed: () => setState(() => _logMessages = ''),
-                        child: const Text('Clear'),
-                      ),
-                    ],
-                  ),
-                  const Divider(height: 1),
-                  Expanded(
-                    child: SingleChildScrollView(
-                      controller: _logScrollController,
-                      reverse: true,
-                      child: Padding(
-                        padding: const EdgeInsets.only(top: 4.0),
-                        child: Text(
-                          _logMessages,
-                          style: const TextStyle(
-                            fontFamily: 'monospace',
-                            fontSize: 10, // Font diperkecil agar muat
+                      if (isSessionActive)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4.0),
+                          child: SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton.icon(
+                              icon: const Icon(Icons.check_circle),
+                              label: const Text('Selesaikan & Bayar'),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.teal,
+                              ),
+                              onPressed: () => _showConfirmationDialog(mejaId),
+                            ),
                           ),
                         ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+        panel: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 5,
+                  margin: const EdgeInsets.symmetric(vertical: 8.0),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade700,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Padding(
+                    padding: EdgeInsets.only(left: 8.0),
+                    child: Text(
+                      'Log Komunikasi',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
                       ),
                     ),
+                  ),
+                  TextButton(
+                    onPressed: () => setState(() => _logMessages = ''),
+                    child: const Text('Clear'),
                   ),
                 ],
               ),
-            ),
+              const Divider(height: 1),
+              Expanded(
+                child: SingleChildScrollView(
+                  controller: _logScrollController,
+                  reverse: true,
+                  child: Padding(
+                    padding: const EdgeInsets.only(
+                      top: 4.0,
+                      left: 8.0,
+                      right: 8.0,
+                    ),
+                    child: Text(
+                      _logMessages,
+                      style: const TextStyle(
+                        fontFamily: 'monospace',
+                        fontSize: 10,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
-        ],
+        ),
+        minHeight: screenHeight * 0.1,
+        maxHeight: screenHeight * 0.7,
+        backdropEnabled: true,
+        color: const Color(0xFF2a2a2a),
+        borderRadius: const BorderRadius.only(
+          topLeft: Radius.circular(24.0),
+          topRight: Radius.circular(24.0),
+        ),
       ),
     );
   }
