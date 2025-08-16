@@ -1,7 +1,7 @@
 // lib/main.dart
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:putra_jaya_billiard/pages/home_page.dart'; // Arahkan ke HomePage
+import 'package:putra_jaya_billiard/auth_wrapper.dart'; // <-- UBAH IMPORT
 import 'firebase_options.dart';
 
 void main() async {
@@ -27,8 +27,8 @@ class MyApp extends StatelessWidget {
         primaryColor: Colors.tealAccent,
       ),
       debugShowCheckedModeBanner: false,
-      // --- KEMBALI KE AWAL: Langsung ke HomePage ---
-      home: const HomePage(),
+      // UBAH: Gunakan AuthWrapper sebagai halaman utama
+      home: const AuthWrapper(),
     );
   }
 }
