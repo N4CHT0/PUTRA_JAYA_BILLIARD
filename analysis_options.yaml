@@ -1,0 +1,6 @@
+include: package:flutter_lints/flutter.yaml
+analyzer:
+  errors:
+    deprecated_member_use: ignore
+    avoid_types_as_parameter_names: ignore
+    avoid_print: ignore

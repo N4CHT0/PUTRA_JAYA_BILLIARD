@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "77248230089",
+    "project_id": "putra-jaya-billiard",
+    "storage_bucket": "putra-jaya-billiard.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:77248230089:android:f4e339a43b8a6e134a9318",
+        "android_client_info": {
+          "package_name": "com.example.putra_jaya_billiard"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBEDyyOqYaWgsovtz2To7NoFIgvtgYtk6U"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
