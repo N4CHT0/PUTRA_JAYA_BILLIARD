@@ -6,8 +6,9 @@ import 'package:putra_jaya_billiard/utils/pdf_generator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class ReportsPage extends StatefulWidget {
-  // --- KEMBALI KE AWAL: Constructor tidak lagi memerlukan 'userRole' ---
-  const ReportsPage({super.key});
+  // --- PERUBAHAN 1: Menambahkan parameter untuk menerima userRole ---
+  final String userRole;
+  const ReportsPage({super.key, required this.userRole});
 
   @override
   State<ReportsPage> createState() => _ReportsPageState();
@@ -22,8 +23,10 @@ class _ReportsPageState extends State<ReportsPage>
   @override
   void initState() {
     super.initState();
-    // --- KEMBALI KE AWAL: Jumlah tab statis (selalu 4) ---
-    _tabController = TabController(length: 4, vsync: this);
+    // --- PERUBAHAN 2: Jumlah tab ditentukan oleh role ---
+    final tabLength =
+        widget.userRole == 'admin' ? 4 : 2; // Admin: 4 tab, Pegawai: 2 tab
+    _tabController = TabController(length: tabLength, vsync: this);
     _loadShiftSettings();
   }
 
@@ -64,6 +67,31 @@ class _ReportsPageState extends State<ReportsPage>
 
   @override
   Widget build(BuildContext context) {
+    // --- PERUBAHAN 3: Daftar tab dan view dibuat dinamis berdasarkan role ---
+    final List<Widget> tabs = widget.userRole == 'admin'
+        ? const [
+            Tab(text: 'Shift'),
+            Tab(text: 'Harian'),
+            Tab(text: 'Mingguan'),
+            Tab(text: 'Bulanan'),
+          ]
+        : const [
+            Tab(text: 'Shift'),
+            Tab(text: 'Harian'),
+          ];
+
+    final List<Widget> tabViews = widget.userRole == 'admin'
+        ? [
+            _buildReportView(ReportType.shift),
+            _buildReportView(ReportType.daily),
+            _buildReportView(ReportType.weekly),
+            _buildReportView(ReportType.monthly),
+          ]
+        : [
+            _buildReportView(ReportType.shift),
+            _buildReportView(ReportType.daily),
+          ];
+
     return Container(
       decoration: const BoxDecoration(
         gradient: LinearGradient(
@@ -85,39 +113,26 @@ class _ReportsPageState extends State<ReportsPage>
               onPressed: () => _selectDate(context),
             ),
           ],
-          // --- KEMBALI KE AWAL: Tab statis (selalu 4) ---
           bottom: TabBar(
             controller: _tabController,
             indicatorColor: Colors.cyanAccent,
             labelColor: Colors.white,
             unselectedLabelColor: Colors.white70,
-            tabs: const [
-              Tab(text: 'Shift'),
-              Tab(text: 'Harian'),
-              Tab(text: 'Mingguan'),
-              Tab(text: 'Bulanan'),
-            ],
+            tabs: tabs, // Menggunakan daftar tab dinamis
           ),
         ),
         body: TabBarView(
           controller: _tabController,
-          children: [
-            _buildReportView(ReportType.shift),
-            _buildReportView(ReportType.daily),
-            _buildReportView(ReportType.weekly),
-            _buildReportView(ReportType.monthly),
-          ],
+          children: tabViews, // Menggunakan daftar view dinamis
         ),
       ),
     );
   }
 
-  // ... (Sisa kode di _ReportsPageState sama seperti versi terakhir, tidak perlu diubah)
-  // (Saya salin ulang untuk kelengkapan)
-
   Widget _buildReportView(ReportType type) {
     DateTime start, end;
     String title;
+
     switch (type) {
       case ReportType.shift:
       case ReportType.daily:
@@ -142,6 +157,7 @@ class _ReportsPageState extends State<ReportsPage>
             'Bulanan - ${intl.DateFormat('MMMM yyyy').format(_selectedDate)}';
         break;
     }
+
     if (type == ReportType.shift) {
       return _buildShiftReportBody(start, end);
     } else {
@@ -293,22 +309,24 @@ class _ReportsPageState extends State<ReportsPage>
                 },
               ),
             ),
-            Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: ElevatedButton.icon(
-                icon: const Icon(Icons.print),
-                label: const Text('Cetak Laporan Ini'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.teal.withOpacity(0.8),
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12)),
+            // --- PERUBAHAN 4: Tombol cetak hanya muncul untuk admin ---
+            if (widget.userRole == 'admin')
+              Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: ElevatedButton.icon(
+                  icon: const Icon(Icons.print),
+                  label: const Text('Cetak Laporan Ini'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.teal.withOpacity(0.8),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 24, vertical: 12),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12)),
+                  ),
+                  onPressed: () => PdfGenerator.printReport(
+                      title, transactions, totalRevenue),
                 ),
-                onPressed: () =>
-                    PdfGenerator.printReport(title, transactions, totalRevenue),
               ),
-            ),
           ],
         );
       },

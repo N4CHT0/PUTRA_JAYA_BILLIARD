@@ -1,3 +1,5 @@
+// lib/pages/login_page.dart
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:putra_jaya_billiard/services/auth_service.dart';
 
@@ -16,7 +18,7 @@ class _LoginPageState extends State<LoginPage> {
 
   bool _isLoading = false;
   String _errorMessage = '';
-  bool _isPasswordVisible = false; // NOTE: State untuk fitur visible password
+  bool _isPasswordVisible = false;
 
   @override
   void dispose() {
@@ -26,27 +28,34 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   Future<void> _signIn() async {
-    if (_formKey.currentState?.validate() ?? false) {
-      setState(() {
-        _isLoading = true;
-        _errorMessage = '';
-      });
+    if (!(_formKey.currentState?.validate() ?? false)) return;
 
-      final user = await _authService.signInWithEmailAndPassword(
+    setState(() {
+      _isLoading = true;
+      _errorMessage = '';
+    });
+
+    try {
+      // Tugas LoginPage HANYA memanggil fungsi sign-in.
+      // AuthWrapper akan menangani sisanya. Ini adalah cara yang benar.
+      await _authService.signInWithEmailAndPassword(
         _emailController.text.trim(),
         _passwordController.text.trim(),
       );
-
-      if (!mounted) return;
-
-      if (user == null) {
+    } on FirebaseAuthException catch (e) {
+      if (e.code == 'user-not-found' ||
+          e.code == 'wrong-password' ||
+          e.code == 'invalid-credential') {
+        _errorMessage = 'Email atau password yang Anda masukkan salah.';
+      } else {
+        _errorMessage = 'Terjadi eror. Silakan coba lagi nanti.';
+      }
+    } finally {
+      if (mounted) {
         setState(() {
-          _errorMessage =
-              'Login gagal. Periksa kembali email dan password Anda.';
           _isLoading = false;
         });
       }
-      // Jika berhasil, AuthWrapper akan otomatis mengarahkan ke HomePage
     }
   }
 
@@ -54,7 +63,6 @@ class _LoginPageState extends State<LoginPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       body: Container(
-        // NOTE: Latar belakang gradien untuk tampilan modern
         decoration: const BoxDecoration(
           gradient: LinearGradient(
             colors: [Color(0xFF1a1a2e), Color(0xFF16213e)],
@@ -73,9 +81,8 @@ class _LoginPageState extends State<LoginPage> {
                   mainAxisAlignment: MainAxisAlignment.center,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    // NOTE: Ikon besar sebagai "logo"
                     const Icon(
-                      Icons.sports, // Changed to a valid constant icon
+                      Icons.sports, // Ganti dengan ikon yang tersedia
                       size: 80,
                       color: Colors.tealAccent,
                     ),
@@ -93,7 +100,6 @@ class _LoginPageState extends State<LoginPage> {
                       style: TextStyle(fontSize: 16, color: Colors.grey[400]),
                     ),
                     const SizedBox(height: 48),
-                    // NOTE: Style baru untuk TextFormField
                     TextFormField(
                       controller: _emailController,
                       decoration: InputDecoration(
@@ -116,10 +122,9 @@ class _LoginPageState extends State<LoginPage> {
                       },
                     ),
                     const SizedBox(height: 20),
-                    // NOTE: TextFormField Password dengan fitur visible
                     TextFormField(
                       controller: _passwordController,
-                      obscureText: !_isPasswordVisible, // Terhubung ke state
+                      obscureText: !_isPasswordVisible,
                       decoration: InputDecoration(
                         labelText: 'Password',
                         prefixIcon: const Icon(Icons.lock_outline),
@@ -128,7 +133,6 @@ class _LoginPageState extends State<LoginPage> {
                         ),
                         filled: true,
                         fillColor: Colors.black.withOpacity(0.2),
-                        // Tombol untuk toggle visible password
                         suffixIcon: IconButton(
                           icon: Icon(
                             _isPasswordVisible
@@ -159,7 +163,6 @@ class _LoginPageState extends State<LoginPage> {
                           textAlign: TextAlign.center,
                         ),
                       ),
-                    // NOTE: Style baru untuk tombol login
                     ElevatedButton(
                       onPressed: _isLoading ? null : _signIn,
                       style: ElevatedButton.styleFrom(

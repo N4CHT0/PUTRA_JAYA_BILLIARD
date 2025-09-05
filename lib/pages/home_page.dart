@@ -5,21 +5,22 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart' as intl;
 import 'package:putra_jaya_billiard/models/billing_transaction.dart';
 import 'package:putra_jaya_billiard/models/relay_data.dart';
+import 'package:putra_jaya_billiard/models/user_model.dart';
+import 'package:putra_jaya_billiard/pages/accounts_page.dart'; // Import halaman akun
 import 'package:putra_jaya_billiard/pages/reports_page.dart';
 import 'package:putra_jaya_billiard/pages/settings_page.dart';
 import 'package:putra_jaya_billiard/pages/transactions_page.dart';
 import 'package:putra_jaya_billiard/services/arduino_service.dart';
+import 'package:putra_jaya_billiard/services/auth_service.dart';
 import 'package:putra_jaya_billiard/services/firebase_service.dart';
-import 'package:putra_jaya_billiard/services/auth_service.dart'; // NOTE: Pastikan import ini ada
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sliding_up_panel/sliding_up_panel.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 
 // --- Constants ---
 const int numRelays = 32;
 
 class HomePage extends StatefulWidget {
-  final User user;
+  final UserModel user;
 
   const HomePage({
     super.key,
@@ -31,15 +32,10 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  // --- Constants for SharedPreferences keys ---
   static const String _ratePerHourKey = 'ratePerHour';
   static const String _ratePerMinuteKey = 'ratePerMinute';
-
-  // --- Services ---
   final ArduinoService _arduinoService = ArduinoService();
   final FirebaseService _firebaseService = FirebaseService();
-
-  // --- State Variables ---
   List<String> _availablePorts = [];
   final Map<int, RelayData> _relayStates = {};
   final Map<int, DateTime> _activeSessions = {};
@@ -47,11 +43,8 @@ class _HomePageState extends State<HomePage> {
   String _logMessages = '';
   double _ratePerHour = 50000.0;
   double _ratePerMinute = 0.0;
-
-  // --- Controllers ---
   final ScrollController _logScrollController = ScrollController();
 
-  // --- Lifecycle Methods ---
   @override
   void initState() {
     super.initState();
@@ -70,7 +63,6 @@ class _HomePageState extends State<HomePage> {
     super.dispose();
   }
 
-  // --- Initialization and Data Loading ---
   void _initRelayStates() {
     for (int i = 1; i <= numRelays; i++) {
       _relayStates[i] = RelayData(id: i);
@@ -87,15 +79,12 @@ class _HomePageState extends State<HomePage> {
     _addLog('Harga dimuat: Rp$_ratePerHour/jam, Rp$_ratePerMinute/menit');
   }
 
-  // --- Core Logic (Timers & Billing) ---
   void _startLogicTimer() {
     _logicTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (!mounted) return;
-
       final currentTime = DateTime.now();
       final Set<int> newlyFinishedTimerIds = {};
       bool uiNeedsUpdate = false;
-
       _relayStates.forEach((id, relay) {
         if (relay.status == RelayStatus.timer && relay.timerEndTime != null) {
           uiNeedsUpdate = true;
@@ -149,7 +138,6 @@ class _HomePageState extends State<HomePage> {
       _setRelayStateToOff(mejaId);
       return;
     }
-
     final endTime = DateTime.now();
     final duration = endTime.difference(startTime);
     final cost = _calculateCost(duration);
@@ -226,7 +214,6 @@ class _HomePageState extends State<HomePage> {
     _setRelayStateToOff(mejaId);
   }
 
-  // --- Arduino/Serial Communication ---
   void _initPorts() {
     setState(() => _availablePorts = _arduinoService.getAvailablePorts());
   }
@@ -261,7 +248,6 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  // --- UI Dialogs ---
   Future<void> _showConfirmationDialog(int mejaId) async {
     final startTime = _activeSessions[mejaId];
     if (startTime == null) return;
@@ -380,7 +366,6 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  // --- Helper Methods ---
   void _addLog(String message) {
     if (!mounted) return;
     setState(() {
@@ -440,7 +425,7 @@ class _HomePageState extends State<HomePage> {
             bottom: false,
             child: Column(
               children: [
-                _buildCustomAppBar(), // NOTE: Fungsi ini sekarang sudah diubah
+                _buildCustomAppBar(),
                 _buildConnectionStatusPanel(),
                 Expanded(
                   child: GridView.builder(
@@ -471,76 +456,79 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  // NOTE: BAGIAN APPBAR YANG SUDAH DIPERBARUI
   Widget _buildCustomAppBar() {
     final authService = AuthService();
+    final userRole = widget.user.role;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          // BAGIAN KIRI APPBAR (DENGAN INFO USER)
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                'Putra Jaya Billiard',
-                style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+              // --- PERUBAHAN DI SINI ---
+              // Tampilkan nama pengguna yang login
+              Text(
+                widget.user.nama,
+                style:
+                    const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 2),
-              // Menampilkan email user yang sedang login
               Text(
-                widget.user.email ??
-                    'User', // Mengambil email dari 'widget.user'
+                '${widget.user.email} (${userRole.toUpperCase()})',
                 style: const TextStyle(fontSize: 12, color: Colors.white70),
               ),
             ],
           ),
-
-          // BAGIAN KANAN APPBAR (DENGAN TOMBOL LOGOUT)
           Row(
             children: [
-              IconButton(
-                icon: const Icon(Icons.history),
-                tooltip: 'Riwayat Transaksi',
-                onPressed: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                      builder: (context) => const TransactionsPage()),
+              if (userRole == 'admin') ...[
+                IconButton(
+                  icon: const Icon(Icons.manage_accounts),
+                  tooltip: 'Manajemen Akun',
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => AccountsPage(admin: widget.user),
+                    ),
+                  ),
                 ),
-              ),
+                IconButton(
+                  icon: const Icon(Icons.history),
+                  tooltip: 'Riwayat Transaksi',
+                  onPressed: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (context) => const TransactionsPage())),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.settings),
+                  tooltip: 'Pengaturan',
+                  onPressed: () async {
+                    final settingsChanged = await Navigator.push<bool>(
+                        context,
+                        MaterialPageRoute(
+                            builder: (context) => const SettingsPage()));
+                    if (settingsChanged == true) _loadRates();
+                  },
+                ),
+              ],
               IconButton(
                 icon: const Icon(Icons.bar_chart),
                 tooltip: 'Laporan Pendapatan',
                 onPressed: () => Navigator.push(
                   context,
-                  MaterialPageRoute(builder: (context) => const ReportsPage()),
+                  MaterialPageRoute(
+                    builder: (context) => ReportsPage(userRole: userRole),
+                  ),
                 ),
               ),
               IconButton(
-                icon: const Icon(Icons.settings),
-                tooltip: 'Pengaturan',
-                onPressed: () async {
-                  final settingsChanged = await Navigator.push<bool>(
-                    context,
-                    MaterialPageRoute(
-                        builder: (context) => const SettingsPage()),
-                  );
-                  if (settingsChanged == true) {
-                    _loadRates();
-                  }
-                },
-              ),
-              // TOMBOL LOGOUT BARU
-              IconButton(
                 icon: const Icon(Icons.logout),
                 tooltip: 'Logout',
-                onPressed: () {
-                  // Panggil fungsi signOut dari AuthService
-                  authService.signOut();
-                  // AuthWrapper akan otomatis mengarahkan ke halaman login
-                },
+                onPressed: () => authService.signOut(),
               ),
             ],
           ),
