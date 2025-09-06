@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:putra_jaya_billiard/models/user_model.dart';
 
 class AddEmployeePage extends StatefulWidget {
-  const AddEmployeePage({super.key});
+  final UserModel admin; // menerima admin
+  const AddEmployeePage({super.key, required this.admin});
 
   @override
   State<AddEmployeePage> createState() => _AddEmployeePageState();
@@ -14,7 +16,6 @@ class _AddEmployeePageState extends State<AddEmployeePage> {
   final _namaController = TextEditingController();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
-  final _organisasiController = TextEditingController();
 
   bool _isLoading = false;
 
@@ -37,14 +38,14 @@ class _AddEmployeePageState extends State<AddEmployeePage> {
 
       String uid = userCredential.user!.uid;
 
-      // 2. Simpan data di Firestore
+      // 2. Simpan data di Firestore, organisasi sama dengan admin
       await FirebaseFirestore.instance.collection('users').doc(uid).set({
         'uid': uid,
         'nama': _namaController.text.trim(),
         'email': _emailController.text.trim(),
-        'organisasi': _organisasiController.text.trim(),
-        'kodeOrganisasi': 'KODE123', // Contoh data statis
-        'role': 'pegawai', // Contoh data statis
+        'organisasi': widget.admin.organisasi,
+        'kodeOrganisasi': widget.admin.kodeOrganisasi,
+        'role': 'pegawai',
         'createdAt': Timestamp.now(),
       });
 
@@ -54,7 +55,6 @@ class _AddEmployeePageState extends State<AddEmployeePage> {
             backgroundColor: Colors.green),
       );
 
-      // Kembali ke halaman sebelumnya setelah berhasil
       if (mounted) Navigator.pop(context);
     } on FirebaseAuthException catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -80,7 +80,6 @@ class _AddEmployeePageState extends State<AddEmployeePage> {
     _namaController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
-    _organisasiController.dispose();
     super.dispose();
   }
 
@@ -121,14 +120,6 @@ class _AddEmployeePageState extends State<AddEmployeePage> {
                 obscureText: true,
                 validator: (value) =>
                     value!.length < 6 ? 'Password minimal 6 karakter' : null,
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _organisasiController,
-                decoration: const InputDecoration(
-                    labelText: 'Nama Organisasi', border: OutlineInputBorder()),
-                validator: (value) =>
-                    value!.isEmpty ? 'Organisasi tidak boleh kosong' : null,
               ),
               const SizedBox(height: 24),
               _isLoading

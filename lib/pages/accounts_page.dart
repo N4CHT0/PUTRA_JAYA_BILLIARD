@@ -80,11 +80,7 @@ class _AccountsPageState extends State<AccountsPage> {
 
   Future<void> _deleteUser(String uid) async {
     try {
-      // Menghapus data dari Firestore
       await _firestore.collection('users').doc(uid).delete();
-
-      // PENTING: Menghapus user dari Firebase Auth harus dilakukan dari backend
-      // (Cloud Function) untuk keamanan. Kode ini hanya menghapus dari database.
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
             content: Text('Pegawai berhasil dihapus dari database'),
@@ -103,10 +99,16 @@ class _AccountsPageState extends State<AccountsPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Manajemen Akun Pegawai'),
+        title: Text('Manajemen Akun Pegawai (${widget.admin.organisasi})'),
       ),
       body: StreamBuilder<QuerySnapshot>(
-        stream: _firestore.collection('users').snapshots(),
+        stream: _firestore
+            .collection('users')
+            .where('role', isEqualTo: 'pegawai')
+            .where('kodeOrganisasi',
+                isEqualTo:
+                    widget.admin.kodeOrganisasi) // hanya organisasi admin
+            .snapshots(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
@@ -186,7 +188,8 @@ class _AccountsPageState extends State<AccountsPage> {
         onPressed: () {
           Navigator.push(
             context,
-            MaterialPageRoute(builder: (context) => const AddEmployeePage()),
+            MaterialPageRoute(
+                builder: (context) => AddEmployeePage(admin: widget.admin)),
           );
         },
         backgroundColor: Colors.indigo,
