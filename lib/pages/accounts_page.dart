@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:cloud_functions/cloud_functions.dart';
 import 'package:putra_jaya_billiard/models/user_model.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'add_employee_page.dart';
 
 class AccountsPage extends StatefulWidget {
   final UserModel admin;
@@ -13,94 +12,41 @@ class AccountsPage extends StatefulWidget {
 }
 
 class _AccountsPageState extends State<AccountsPage> {
-  final FirebaseFunctions _functions = FirebaseFunctions.instance;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-  Future<void> _callFunction(
-      String name, Map<String, dynamic> params, String successMessage) async {
-    // Fungsi helper untuk mengurangi duplikasi kode
-    if (!mounted) return;
-    try {
-      final callable = _functions.httpsCallable(name);
-      await callable.call(params);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(successMessage)),
-      );
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: ${e.toString()}')),
-      );
-    }
-  }
-
-  void _openFirebaseConsole() async {
-    final Uri url = Uri.parse('https://console.firebase.google.com/');
-    if (!await launchUrl(url)) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Tidak bisa membuka URL')),
-      );
-    }
-  }
-
-  void _showAccountDialog({UserModel? pegawai}) {
-    final namaController = TextEditingController(text: pegawai?.nama ?? '');
-    final emailController = TextEditingController(text: pegawai?.email ?? '');
-    final passwordController = TextEditingController();
-    final isEditing = pegawai != null;
+  void _showEditDialog(UserModel user) {
+    final nameController = TextEditingController(text: user.nama);
+    final roleController = TextEditingController(text: user.role);
 
     showDialog(
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: Text(isEditing ? 'Edit Akun Pegawai' : 'Buat Akun Pegawai'),
+          title: const Text('Edit Pegawai'),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // --- TAMBAHKAN INPUT NAMA ---
               TextField(
-                  controller: namaController,
-                  decoration: const InputDecoration(labelText: 'Nama Lengkap')),
+                controller: nameController,
+                decoration: const InputDecoration(labelText: 'Nama'),
+              ),
+              TextField(
+                controller: roleController,
+                decoration: const InputDecoration(labelText: 'Role'),
+              ),
               const SizedBox(height: 8),
-              TextField(
-                  controller: emailController,
-                  decoration: const InputDecoration(labelText: 'Email')),
-              const SizedBox(height: 8),
-              TextField(
-                  controller: passwordController,
-                  decoration: InputDecoration(
-                      labelText: 'Password',
-                      hintText: isEditing ? 'Isi untuk mengubah' : '')),
+              Text('Email & password tidak dapat diubah di sini.',
+                  style: TextStyle(color: Colors.grey[600], fontSize: 12)),
             ],
           ),
           actions: [
-            // ... (Tombol Batal dan Simpan)
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Batal'),
+            ),
             ElevatedButton(
               onPressed: () {
-                // --- PERUBAHAN DI SINI ---
-                final nama = namaController.text.trim();
-                final email = emailController.text.trim();
-                final password = passwordController.text.trim();
-
-                if (isEditing) {
-                  // (Untuk edit, kita akan update Firestore saja, karena Cloud Function
-                  // tidak kita buat untuk update nama demi simplicitas)
-                  FirebaseFirestore.instance
-                      .collection('users')
-                      .doc(pegawai.uid)
-                      .update({'nama': nama, 'email': email});
-                } else {
-                  // Saat membuat, kita akan kirim 'nama' ke Cloud Function
-                  _callFunction(
-                      'createPegawai',
-                      {
-                        'nama': nama, // <-- Kirim nama
-                        'email': email,
-                        'password': password,
-                        'organisasi': widget.admin.organisasi,
-                        'kodeOrganisasi': widget.admin.kodeOrganisasi,
-                      },
-                      'Akun berhasil dibuat!');
-                }
+                _updateUser(user, nameController.text, roleController.text);
                 Navigator.of(context).pop();
               },
               child: const Text('Simpan'),
@@ -111,68 +57,125 @@ class _AccountsPageState extends State<AccountsPage> {
     );
   }
 
+  Future<void> _updateUser(
+      UserModel user, String newName, String newRole) async {
+    try {
+      await _firestore.collection('users').doc(user.uid).update({
+        'nama': newName,
+        'role': newRole,
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('Data berhasil diperbarui'),
+            backgroundColor: Colors.green),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+            content: Text('Gagal memperbarui data: $e'),
+            backgroundColor: Colors.red),
+      );
+    }
+  }
+
+  Future<void> _deleteUser(String uid) async {
+    try {
+      // Menghapus data dari Firestore
+      await _firestore.collection('users').doc(uid).delete();
+
+      // PENTING: Menghapus user dari Firebase Auth harus dilakukan dari backend
+      // (Cloud Function) untuk keamanan. Kode ini hanya menghapus dari database.
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('Pegawai berhasil dihapus dari database'),
+            backgroundColor: Colors.green),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+            content: Text('Gagal menghapus pegawai: $e'),
+            backgroundColor: Colors.red),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Manajemen Akun ${widget.admin.organisasi}'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.open_in_new),
-            tooltip: 'Buka Firebase Console (Manual)',
-            onPressed: _openFirebaseConsole,
-          )
-        ],
+        title: const Text('Manajemen Akun Pegawai'),
       ),
       body: StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance
-            .collection('users')
-            .where('kodeOrganisasi', isEqualTo: widget.admin.kodeOrganisasi)
-            .where('role', isEqualTo: 'pegawai')
-            .snapshots(),
+        stream: _firestore.collection('users').snapshots(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
+          if (snapshot.hasError) {
+            return Center(child: Text('Terjadi kesalahan: ${snapshot.error}'));
+          }
           if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-            return const Center(child: Text('Belum ada akun pegawai.'));
+            return const Center(child: Text('Belum ada data pegawai.'));
           }
 
-          final pegawaiDocs = snapshot.data!.docs;
+          final users = snapshot.data!.docs
+              .map((doc) => UserModel.fromFirestore(doc))
+              .toList();
 
           return ListView.builder(
-            itemCount: pegawaiDocs.length,
+            itemCount: users.length,
             itemBuilder: (context, index) {
-              final doc = pegawaiDocs[index];
-              final data = doc.data() as Map<String, dynamic>;
-
-              final pegawai = UserModel(
-                uid: doc.id,
-                email: data['email'] ?? 'Email tidak ada',
-                role: data['role'] ?? 'pegawai',
-                organisasi: data['organisasi'] ?? 'Organisasi tidak ada',
-                kodeOrganisasi: data['kodeOrganisasi'] ?? 'N/A',
-                // --- PERUBAHAN DI SINI ---
-                nama: data['nama'] ?? 'Tanpa Nama',
-              );
-
-              return ListTile(
-                // --- PERUBAHAN DI SINI ---
-                title: Text(pegawai.nama), // Tampilkan nama
-                subtitle: Text(pegawai.email), // Email jadi subtitle
-                trailing: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    IconButton(
-                      icon: const Icon(Icons.edit, color: Colors.amber),
-                      onPressed: () => _showAccountDialog(pegawai: pegawai),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.delete, color: Colors.redAccent),
-                      onPressed: () => _callFunction('deletePegawai',
-                          {'uid': pegawai.uid}, 'Akun berhasil dihapus!'),
-                    ),
-                  ],
+              final user = users[index];
+              return Card(
+                margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                elevation: 2,
+                child: ListTile(
+                  leading: CircleAvatar(
+                    backgroundColor: Colors.indigo.shade100,
+                    child: Text(user.nama.isNotEmpty
+                        ? user.nama[0].toUpperCase()
+                        : '?'),
+                  ),
+                  title: Text(user.nama,
+                      style: const TextStyle(fontWeight: FontWeight.bold)),
+                  subtitle: Text(user.email),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.edit, color: Colors.blue),
+                        onPressed: () => _showEditDialog(user),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.delete, color: Colors.red),
+                        onPressed: () {
+                          showDialog(
+                            context: context,
+                            builder: (context) => AlertDialog(
+                              title: const Text('Konfirmasi Hapus'),
+                              content: Text(
+                                  'Anda yakin ingin menghapus ${user.nama}? Akun Auth tidak akan terhapus.'),
+                              actions: [
+                                TextButton(
+                                  onPressed: () => Navigator.of(context).pop(),
+                                  child: const Text('Batal'),
+                                ),
+                                ElevatedButton(
+                                  style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.red),
+                                  onPressed: () {
+                                    _deleteUser(user.uid);
+                                    Navigator.of(context).pop();
+                                  },
+                                  child: const Text('Hapus'),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                    ],
+                  ),
                 ),
               );
             },
@@ -180,9 +183,14 @@ class _AccountsPageState extends State<AccountsPage> {
         },
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: () => _showAccountDialog(),
-        child: const Icon(Icons.add),
-        tooltip: 'Buat Akun Pegawai',
+        onPressed: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (context) => const AddEmployeePage()),
+          );
+        },
+        backgroundColor: Colors.indigo,
+        child: const Icon(Icons.add, color: Colors.white),
       ),
     );
   }
