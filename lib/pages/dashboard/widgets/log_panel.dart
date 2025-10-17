@@ -4,20 +4,24 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 
 class LogPanel extends StatelessWidget {
-  final ScrollController logScrollController;
   final String logMessages;
-  final VoidCallback onClearLogs;
+  final ScrollController logScrollController;
+  final VoidCallback onClearLog;
 
   const LogPanel({
     super.key,
-    required this.logScrollController,
     required this.logMessages,
-    required this.onClearLogs,
+    required this.logScrollController,
+    required this.onClearLog,
   });
 
   @override
   Widget build(BuildContext context) {
-    // Ini adalah panel saat terbuka penuh
+    // Ini adalah widget kosong karena panel akan dirender oleh SlidingUpPanel
+    return const SizedBox.shrink();
+  }
+
+  Widget buildPanel() {
     return ClipRRect(
       borderRadius: const BorderRadius.only(
         topLeft: Radius.circular(24.0),
@@ -45,7 +49,7 @@ class LogPanel extends StatelessWidget {
                         style: TextStyle(
                             fontWeight: FontWeight.bold, fontSize: 16)),
                     TextButton(
-                      onPressed: onClearLogs,
+                      onPressed: onClearLog,
                       child: const Text('Clear'),
                     ),
                   ],
@@ -76,8 +80,7 @@ class LogPanel extends StatelessWidget {
     );
   }
 
-  // Widget ini bisa digunakan untuk kedua state (terbuka/tertutup)
-  static Widget buildCollapsed() {
+  Widget buildCollapsed() {
     return ClipRRect(
       borderRadius: const BorderRadius.only(
         topLeft: Radius.circular(24.0),
@@ -88,12 +91,16 @@ class LogPanel extends StatelessWidget {
         child: Container(
           decoration: const BoxDecoration(
             color: Color.fromARGB(77, 0, 0, 0),
+            borderRadius: BorderRadius.only(
+              topLeft: Radius.circular(24.0),
+              topRight: Radius.circular(24.0),
+            ),
           ),
           child: Center(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                _buildDragHandle(marginBottom: 8.0),
+                _buildDragHandle(isCollapsed: true),
                 const Text(
                   "Log Komunikasi",
                   style: TextStyle(fontWeight: FontWeight.bold),
@@ -106,11 +113,14 @@ class LogPanel extends StatelessWidget {
     );
   }
 
-  static Widget _buildDragHandle({double marginBottom = 10.0}) {
+  Widget _buildDragHandle({bool isCollapsed = false}) {
     return Container(
       width: 40,
       height: 5,
-      margin: EdgeInsets.only(top: 10.0, bottom: marginBottom),
+      margin: EdgeInsets.only(
+        top: 10.0,
+        bottom: isCollapsed ? 8.0 : 10.0,
+      ),
       decoration: BoxDecoration(
         color: Colors.grey.shade700,
         borderRadius: BorderRadius.circular(12),

@@ -1,13 +1,15 @@
+// lib/models/product_model.dart
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class Product {
   final String? id;
   final String name;
-  final String unit; // Diubah dari 'category' menjadi 'unit' (satuan)
+  final String unit;
   final double purchasePrice;
   final double sellingPrice;
   final int stock;
-  final bool isActive; // Ditambahkan untuk status 'Non Aktif'
+  final bool isActive;
 
   Product({
     this.id,
@@ -16,10 +18,9 @@ class Product {
     required this.purchasePrice,
     required this.sellingPrice,
     required this.stock,
-    this.isActive = true, // Default produk aktif saat dibuat
+    this.isActive = true,
   });
 
-  // Mengubah Product object menjadi Map untuk disimpan di Firestore
   Map<String, dynamic> toMap() {
     return {
       'name': name,
@@ -31,17 +32,28 @@ class Product {
     };
   }
 
-  // Membuat Product object dari Firestore DocumentSnapshot
   factory Product.fromFirestore(DocumentSnapshot<Map<String, dynamic>> doc) {
     Map<String, dynamic> data = doc.data()!;
     return Product(
       id: doc.id,
       name: data['name'] ?? '',
-      unit: data['unit'] ?? 'pcs', // Menggunakan 'unit'
+      unit: data['unit'] ?? 'pcs',
       purchasePrice: (data['purchasePrice'] ?? 0).toDouble(),
       sellingPrice: (data['sellingPrice'] ?? 0).toDouble(),
       stock: data['stock'] ?? 0,
-      isActive: data['isActive'] ?? true, // Membaca status 'isActive'
+      isActive: data['isActive'] ?? true,
     );
   }
+
+  // --- BAGIAN PALING PENTING UNTUK MEMPERBAIKI ERROR ---
+  // Override operator '==' dan hashCode untuk perbandingan objek yang benar.
+  // Ini memberitahu Dart untuk menganggap dua objek Product sama jika ID-nya sama.
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    return other is Product && other.id == id;
+  }
+
+  @override
+  int get hashCode => id.hashCode;
 }

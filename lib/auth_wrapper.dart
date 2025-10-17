@@ -1,5 +1,3 @@
-// lib/auth_wrapper.dart
-
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -7,7 +5,8 @@ import 'package:putra_jaya_billiard/models/user_model.dart';
 import 'package:putra_jaya_billiard/pages/login_page.dart';
 import 'package:putra_jaya_billiard/pages/main_layouts.dart';
 import 'package:putra_jaya_billiard/services/auth_service.dart';
-import 'package:window_manager/window_manager.dart'; // <-- 1. IMPORT PACKAGE
+// Import untuk fitur fullscreen
+import 'package:window_manager/window_manager.dart';
 
 class AuthWrapper extends StatelessWidget {
   const AuthWrapper({super.key});
@@ -52,27 +51,21 @@ class RoleDispatcher extends StatelessWidget {
         }
 
         if (snapshot.hasData && snapshot.data!.exists) {
-          // --- 2. LOGIKA FULLSCREEN DITEMPATKAN DI SINI ---
+          // --- LOGIKA FULLSCREEN DITEMPATKAN DI SINI ---
           // Panggil perintah fullscreen setelah UI siap dibangun
           WidgetsBinding.instance.addPostFrameCallback((_) {
             windowManager.setFullScreen(true);
           });
           // --- SELESAI ---
 
-          final data = snapshot.data!.data() as Map<String, dynamic>;
-          final userModel = UserModel(
-            uid: user.uid,
-            email: data['email'] ?? 'Email Firestore Kosong',
-            role: data['role'] ?? 'pegawai',
-            organisasi: data['organisasi'] ?? 'Tidak Diketahui',
-            kodeOrganisasi: data['kodeOrganisasi'] ?? 'N/A',
-            nama: data['nama'] ?? 'Tanpa Nama',
-          );
+          // Menggunakan factory constructor dari UserModel untuk kode yang lebih bersih
+          final userModel = UserModel.fromFirestore(snapshot.data!);
 
           return MainLayout(user: userModel);
         }
 
-        // Jika data user di Firestore tidak ada, paksa logout
+        // Jika data user di Firestore tidak ada (misal dihapus), paksa logout
+        // Ini adalah fallback yang aman
         AuthService().signOut();
         return const LoginPage();
       },

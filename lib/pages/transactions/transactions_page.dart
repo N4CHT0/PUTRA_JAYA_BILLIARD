@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart' as intl;
 import 'package:putra_jaya_billiard/services/firebase_service.dart';
+import 'package:putra_jaya_billiard/widgets/transactions_detail_dialog.dart';
 
 class TransactionsPage extends StatelessWidget {
   const TransactionsPage({super.key});
@@ -18,12 +19,12 @@ class TransactionsPage extends StatelessWidget {
     return Scaffold(
       backgroundColor: Colors.transparent,
       appBar: AppBar(
-        title: const Text('Riwayat Transaksi'),
+        title: const Text('Riwayat Arus Kas'),
         backgroundColor: Colors.transparent,
         elevation: 0,
       ),
       body: StreamBuilder<QuerySnapshot>(
-        stream: firebaseService.getTransactionsStream(),
+        stream: firebaseService.getFinancialTransactionsStream(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
@@ -45,16 +46,19 @@ class TransactionsPage extends StatelessWidget {
             itemBuilder: (context, index) {
               final doc = transactions[index];
               final data = doc.data() as Map<String, dynamic>;
-
-              if (data['type'] == 'billiard') {
-                return _buildBilliardCard(
-                    context, doc, data, formatter, firebaseService);
-              } else if (data['type'] == 'pos') {
-                return _buildPosCard(
-                    context, doc, data, formatter, firebaseService);
-              } else {
-                return const SizedBox.shrink();
-              }
+              // -- DIBUNGKUS DENGAN INKWELL AGAR BISA DI-KLIK --
+              return InkWell(
+                onTap: () {
+                  showDialog(
+                    context: context,
+                    builder: (_) =>
+                        TransactionDetailDialog(transactionData: data),
+                  );
+                },
+                borderRadius: BorderRadius.circular(16),
+                child: _buildTransactionCard(
+                    context, doc, data, formatter, firebaseService),
+              );
             },
           );
         },
@@ -62,61 +66,49 @@ class TransactionsPage extends StatelessWidget {
     );
   }
 
-  Widget _buildBilliardCard(
+  Widget _buildTransactionCard(
       BuildContext context,
       DocumentSnapshot doc,
       Map<String, dynamic> data,
       intl.NumberFormat formatter,
       FirebaseService firebaseService) {
-    final startTime = (data['createdAt'] as Timestamp).toDate();
-    final totalCost = data['totalAmount'] as double;
-    final duration = Duration(seconds: data['durationInSeconds'] ?? 0);
-    final durationString =
-        "${duration.inHours}j ${duration.inMinutes.remainder(60)}m";
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12.0),
-      decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.2),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withOpacity(0.1)),
-      ),
-      child: ListTile(
-        leading: const Icon(Icons.pool, color: Colors.cyanAccent),
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-        title: Text(
-          'Meja ${data['tableId']}',
-          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-        ),
-        subtitle: Padding(
-          padding: const EdgeInsets.only(top: 4.0),
-          child: Text(
-            '${intl.DateFormat('dd MMM yyyy, HH:mm').format(startTime)} • Durasi: $durationString',
-            style: TextStyle(color: Colors.grey[400]),
-          ),
-        ),
-        trailing: _buildTrailing(
-            context, doc.id, totalCost, formatter, firebaseService),
-      ),
-    );
-  }
-
-  Widget _buildPosCard(
-      BuildContext context,
-      DocumentSnapshot doc,
-      Map<String, dynamic> data,
-      intl.NumberFormat formatter,
-      FirebaseService firebaseService) {
-    final transactionTime = (data['createdAt'] as Timestamp).toDate();
+    final isIncome = data['flow'] == 'income';
+    final type = data['type'] ?? 'unknown';
+    final createdAt = (data['createdAt'] as Timestamp).toDate();
     final totalAmount = data['totalAmount'] as double;
-    final cashierName = data['cashierName'] ?? 'N/A';
 
-    final items = data['items'] as List<dynamic>?;
-    // --- PERBAIKAN ERROR 'num' is not a subtype of 'int' ---
-    final totalItems = items?.fold<int>(
-            0, (sum, item) => sum + ((item['quantity'] ?? 0) as num).toInt()) ??
-        0;
+    String title;
+    String subtitle;
+    IconData icon;
+
+    switch (type) {
+      case 'billiard':
+        title = 'Billing Meja ${data['tableId']}';
+        final duration = Duration(seconds: data['durationInSeconds'] ?? 0);
+        subtitle = "${duration.inHours}j ${duration.inMinutes.remainder(60)}m";
+        icon = Icons.pool;
+        break;
+      case 'pos':
+        title = 'Penjualan POS';
+        final items = data['items'] as List<dynamic>?;
+        final totalItems = items?.fold<int>(
+                0,
+                (sum, item) =>
+                    sum + ((item['quantity'] ?? 0) as num).toInt()) ??
+            0;
+        subtitle = '$totalItems item oleh ${data['cashierName']}';
+        icon = Icons.point_of_sale;
+        break;
+      case 'purchase':
+        title = 'Pembelian Stok';
+        subtitle = 'dari ${data['supplierName']}';
+        icon = Icons.shopping_cart;
+        break;
+      default:
+        title = 'Transaksi Lain';
+        subtitle = 'Tidak diketahui';
+        icon = Icons.receipt;
+    }
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12.0),
@@ -126,46 +118,40 @@ class TransactionsPage extends StatelessWidget {
         border: Border.all(color: Colors.white.withOpacity(0.1)),
       ),
       child: ListTile(
-        leading: const Icon(Icons.point_of_sale, color: Colors.amberAccent),
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-        title: const Text(
-          'Transaksi POS',
-          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+        leading:
+            Icon(icon, color: isIncome ? Colors.greenAccent : Colors.redAccent),
+        title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(subtitle),
+            Text(intl.DateFormat('dd MMM yyyy, HH:mm').format(createdAt),
+                style: TextStyle(color: Colors.grey[400], fontSize: 12)),
+          ],
         ),
-        subtitle: Padding(
-          padding: const EdgeInsets.only(top: 4.0),
-          child: Text(
-            '${intl.DateFormat('dd MMM yyyy, HH:mm').format(transactionTime)} • $totalItems item oleh $cashierName',
-            style: TextStyle(color: Colors.grey[400]),
-          ),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              '${isIncome ? '+' : '-'} ${formatter.format(totalAmount)}',
+              style: TextStyle(
+                fontSize: 16,
+                color: isIncome ? Colors.greenAccent : Colors.redAccent,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.delete, color: Colors.grey),
+              onPressed: () async {
+                final confirm = await _showDeleteConfirmationDialog(context);
+                if (confirm == true) {
+                  await firebaseService.deleteFinancialTransaction(doc.id);
+                }
+              },
+            ),
+          ],
         ),
-        trailing: _buildTrailing(
-            context, doc.id, totalAmount, formatter, firebaseService),
       ),
-    );
-  }
-
-  Widget _buildTrailing(BuildContext context, String docId, double amount,
-      intl.NumberFormat formatter, FirebaseService firebaseService) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(
-          formatter.format(amount),
-          style: const TextStyle(fontSize: 16, color: Colors.cyanAccent),
-        ),
-        const SizedBox(width: 8),
-        IconButton(
-          icon: const Icon(Icons.delete, color: Colors.redAccent),
-          onPressed: () async {
-            final confirm = await _showDeleteConfirmationDialog(context);
-            if (confirm == true) {
-              await firebaseService.deleteTransaction(docId);
-            }
-          },
-        ),
-      ],
     );
   }
 

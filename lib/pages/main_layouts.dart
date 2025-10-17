@@ -1,17 +1,20 @@
-// lib/pages/main_layouts.dart
-
 import 'package:flutter/material.dart';
 import 'package:putra_jaya_billiard/models/user_model.dart';
 import 'package:putra_jaya_billiard/pages/accounts/accounts_page.dart';
 import 'package:putra_jaya_billiard/pages/dashboard/dashboard_page.dart';
 import 'package:putra_jaya_billiard/pages/pos/pos_page.dart';
 import 'package:putra_jaya_billiard/pages/products/products_page.dart';
+import 'package:putra_jaya_billiard/pages/purchases/purchase_page.dart';
 import 'package:putra_jaya_billiard/pages/reports/reports_page.dart';
+import 'package:putra_jaya_billiard/pages/reports/stock_report_page.dart';
 import 'package:putra_jaya_billiard/pages/settings/settings_page.dart';
+import 'package:putra_jaya_billiard/pages/stocks/stock_card_page.dart';
+import 'package:putra_jaya_billiard/pages/stocks/stocks_opname_page.dart';
+import 'package:putra_jaya_billiard/pages/suppliers/suppliers_pages.dart';
 import 'package:putra_jaya_billiard/pages/transactions/transactions_page.dart';
 import 'package:putra_jaya_billiard/widgets/app_drawer.dart';
 import 'package:putra_jaya_billiard/widgets/custom_app_bar.dart';
-import 'package:window_manager/window_manager.dart'; // <-- 1. IMPORT YANG HILANG
+import 'package:window_manager/window_manager.dart';
 
 class MainLayout extends StatefulWidget {
   final UserModel user;
@@ -23,40 +26,55 @@ class MainLayout extends StatefulWidget {
 
 class _MainLayoutState extends State<MainLayout> {
   int _selectedIndex = 0;
-  late final List<Widget> _pages;
+  final Map<int, Widget> _pageMap = {};
 
   @override
   void initState() {
     super.initState();
-    _pages = [
-      DashboardPage(user: widget.user), // Index 0
-      ReportsPage(userRole: widget.user.role), // Index 1
-      if (widget.user.role == 'admin') ...[
-        AccountsPage(admin: widget.user), // Index 2
-        const TransactionsPage(), // Index 3
-        const SettingsPage(), // Index 4
-        const ProductsPage(), // Index 5
-        PosPage(currentUser: widget.user), // Index 6
-      ],
-    ];
+    _buildPages();
   }
 
-  // Fungsi ini sudah benar
-  void _toggleNativeFullscreen() async {
-    bool isFull = await windowManager.isFullScreen();
-    windowManager.setFullScreen(!isFull);
+  void _buildPages() {
+    // Halaman yang bisa diakses semua role
+    _pageMap[0] = DashboardPage(user: widget.user);
+    _pageMap[1] = ReportsPage(userRole: widget.user.role);
+    _pageMap[6] = PosPage(currentUser: widget.user);
+    _pageMap[8] = PurchasePage(currentUser: widget.user);
+    _pageMap[9] = const StockReportPage();
+    _pageMap[11] = const StockCardPage();
+
+    // Halaman khusus admin
+    if (widget.user.role == 'admin') {
+      _pageMap[2] = AccountsPage(admin: widget.user);
+      _pageMap[3] = const TransactionsPage();
+      _pageMap[4] = SettingsPage(onSaveComplete: _switchToDashboard);
+      _pageMap[5] = const ProductsPage();
+      _pageMap[7] = const SuppliersPage();
+      _pageMap[10] = StockOpnamePage(currentUser: widget.user);
+    }
+  }
+
+  void _switchToDashboard() {
+    setState(() {
+      _selectedIndex = 0;
+    });
   }
 
   void _onPageSelected(int index) {
-    if (index < _pages.length) {
+    if (_pageMap.containsKey(index)) {
       setState(() {
         _selectedIndex = index;
+      });
+    } else {
+      setState(() {
+        _selectedIndex = 0;
       });
     }
   }
 
-  void _handleSettingsChanged() {
-    print("Settings changed, potentially reload rates here.");
+  void _toggleNativeFullscreen() async {
+    bool isFull = await windowManager.isFullScreen();
+    windowManager.setFullScreen(!isFull);
   }
 
   @override
@@ -65,21 +83,9 @@ class _MainLayoutState extends State<MainLayout> {
       extendBodyBehindAppBar: true,
       appBar: CustomAppBar(
         user: widget.user,
-        onSettingsChanged: _handleSettingsChanged,
-        onGoHome: () => _onPageSelected(0),
-        onGoToPOS: () {
-          if (widget.user.role == 'admin') {
-            _onPageSelected(6);
-          } else {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Anda tidak memiliki akses ke halaman POS.'),
-                backgroundColor: Colors.redAccent,
-              ),
-            );
-          }
-        },
-        // --- 2. HUBUNGKAN FUNGSI FULLSCREEN DI SINI ---
+        onSettingsChanged: () {},
+        onGoHome: _switchToDashboard,
+        onGoToPOS: () => _onPageSelected(6),
         onToggleFullscreen: _toggleNativeFullscreen,
       ),
       drawer: AppDrawer(user: widget.user, onPageSelected: _onPageSelected),
@@ -93,7 +99,19 @@ class _MainLayoutState extends State<MainLayout> {
         ),
         child: IndexedStack(
           index: _selectedIndex,
-          children: _pages,
+          children: List.generate(
+            12,
+            (index) =>
+                _pageMap[index] ??
+                // --- PERBAIKAN UTAMA DI SINI ---
+                // Menambahkan 'const' pada widget yang tidak akan pernah berubah
+                const Center(
+                  child: Text(
+                    "Halaman tidak tersedia untuk role Anda.",
+                    style: TextStyle(color: Colors.white54),
+                  ),
+                ),
+          ),
         ),
       ),
     );

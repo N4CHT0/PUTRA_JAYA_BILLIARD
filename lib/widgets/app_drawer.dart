@@ -1,3 +1,5 @@
+// lib/widgets/app_drawer.dart
+
 import 'package:flutter/material.dart';
 import 'package:putra_jaya_billiard/models/user_model.dart';
 
@@ -13,6 +15,12 @@ class AppDrawer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Fungsi helper untuk menangani navigasi dan menutup drawer
+    void handleNavigation(int index) {
+      onPageSelected(index);
+      Navigator.pop(context);
+    }
+
     return Drawer(
       child: Container(
         color: const Color(0xFF16213e),
@@ -31,17 +39,36 @@ class AppDrawer extends StatelessWidget {
                 color: Color(0xFF1a1a2e),
               ),
             ),
-            // Dihapus: ListTile untuk Dashboard tidak lagi diperlukan di sini.
-            // Dihapus: ListTile untuk Point of Sale (POS) tidak lagi diperlukan di sini.
+            ListTile(
+              leading: const Icon(Icons.dashboard_rounded),
+              title: const Text('Dashboard'),
+              onTap: () => handleNavigation(0),
+            ),
+            ListTile(
+              leading: const Icon(Icons.point_of_sale_rounded),
+              title: const Text('Point of Sale (POS)'),
+              onTap: () => handleNavigation(6),
+            ),
+            ListTile(
+              leading: const Icon(Icons.shopping_cart_rounded),
+              title: const Text('Transaksi Pembelian'),
+              onTap: () => handleNavigation(8),
+            ),
             ListTile(
               leading: const Icon(Icons.bar_chart_rounded),
-              title: const Text('Laporan Pendapatan'),
-              onTap: () {
-                onPageSelected(1); // Index 1 untuk Laporan
-                Navigator.pop(context);
-              },
+              title: const Text('Laporan Keuangan'),
+              onTap: () => handleNavigation(1),
             ),
-            // Tampilkan menu khusus jika role pengguna adalah 'admin'
+            ListTile(
+              leading: const Icon(Icons.inventory_rounded),
+              title: const Text('Laporan Stok'),
+              onTap: () => handleNavigation(9),
+            ),
+            ListTile(
+              leading: const Icon(Icons.history_toggle_off_rounded),
+              title: const Text('Kartu Stok'),
+              onTap: () => handleNavigation(11),
+            ),
             if (user.role == 'admin') ...[
               const Divider(color: Colors.white24, indent: 16, endIndent: 16),
               const Padding(
@@ -52,34 +79,32 @@ class AppDrawer extends StatelessWidget {
               ListTile(
                 leading: const Icon(Icons.manage_accounts_rounded),
                 title: const Text('Manajemen Akun'),
-                onTap: () {
-                  onPageSelected(2); // Index 2 untuk Akun
-                  Navigator.pop(context);
-                },
+                onTap: () => handleNavigation(2),
               ),
               ListTile(
                 leading: const Icon(Icons.receipt_long_rounded),
-                title: const Text('Riwayat Transaksi'),
-                onTap: () {
-                  onPageSelected(3); // Index 3 untuk Transaksi
-                  Navigator.pop(context);
-                },
+                title: const Text('Riwayat Arus Kas'),
+                onTap: () => handleNavigation(3),
               ),
               ListTile(
                 leading: const Icon(Icons.inventory_2_rounded),
                 title: const Text('Manajemen Produk'),
-                onTap: () {
-                  onPageSelected(5); // Index 5 untuk Produk
-                  Navigator.pop(context);
-                },
+                onTap: () => handleNavigation(5),
+              ),
+              ListTile(
+                leading: const Icon(Icons.groups_rounded),
+                title: const Text('Manajemen Supplier'),
+                onTap: () => handleNavigation(7),
+              ),
+              ListTile(
+                leading: const Icon(Icons.rule_folder_rounded),
+                title: const Text('Stok Opname'),
+                onTap: () => handleNavigation(10),
               ),
               ListTile(
                 leading: const Icon(Icons.settings_rounded),
                 title: const Text('Pengaturan'),
-                onTap: () {
-                  onPageSelected(4); // Index 4 untuk Pengaturan
-                  Navigator.pop(context);
-                },
+                onTap: () => handleNavigation(4),
               ),
             ],
           ],
