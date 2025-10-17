@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart' as intl;
 import 'package:putra_jaya_billiard/services/firebase_service.dart';
-import 'package:putra_jaya_billiard/utils/pdf_generator.dart';
+import 'package:putra_jaya_billiard/widgets/transactions_detail_dialog.dart';
+// import 'package:putra_jaya_billiard/utils/pdf_generator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class ReportsPage extends StatefulWidget {
@@ -92,7 +93,7 @@ class _ReportsPageState extends State<ReportsPage>
     return Scaffold(
       backgroundColor: Colors.transparent,
       appBar: AppBar(
-        title: const Text('Laporan Pendapatan'),
+        title: const Text('Laporan Keuangan'),
         backgroundColor: Colors.transparent,
         elevation: 0,
         actions: [
@@ -118,11 +119,14 @@ class _ReportsPageState extends State<ReportsPage>
   }
 
   Widget _buildReportView(ReportType type) {
+    if (type == ReportType.shift) {
+      return _buildRealTimeShiftView();
+    }
+
     DateTime start, end;
     String title;
 
     switch (type) {
-      case ReportType.shift:
       case ReportType.daily:
         start = DateTime(
             _selectedDate.year, _selectedDate.month, _selectedDate.day);
@@ -144,135 +148,183 @@ class _ReportsPageState extends State<ReportsPage>
         title =
             'Bulanan - ${intl.DateFormat('MMMM yyyy').format(_selectedDate)}';
         break;
+      case ReportType.shift:
+      default:
+        return const Center(child: Text("Invalid Report Type"));
     }
-
-    if (type == ReportType.shift) {
-      return _buildShiftReportBody(start, end);
-    } else {
-      return _buildGeneralReportBody(start, end, title);
-    }
+    // --- PERBAIKAN: Bungkus dengan SingleChildScrollView agar bisa scroll jika konten panjang ---
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(8.0),
+      child: _buildGeneralReportBody(start, end, title, isScrollable: false),
+    );
   }
 
-  Widget _buildShiftReportBody(DateTime dayStart, DateTime dayEnd) {
-    final shift1EndHour = (_shift1StartHour + 12) % 24;
-    final shift1Start = dayStart.add(Duration(hours: _shift1StartHour));
-    DateTime shift1End;
-    if (shift1EndHour < _shift1StartHour) {
-      shift1End = dayStart.add(Duration(days: 1, hours: shift1EndHour));
+  Widget _buildRealTimeShiftView() {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+
+    final shift1Start = today.add(Duration(hours: _shift1StartHour));
+    final shift1End = shift1Start.add(const Duration(hours: 12));
+
+    DateTime currentShiftStart, currentShiftEnd;
+    DateTime previousShiftStart, previousShiftEnd;
+    String currentShiftTitle, previousShiftTitle;
+
+    if (now.isAfter(shift1Start) && now.isBefore(shift1End)) {
+      currentShiftStart = shift1Start;
+      currentShiftEnd = shift1End;
+      currentShiftTitle = "Laporan Shift 1 (Saat Ini)";
+
+      previousShiftStart = shift1Start.subtract(const Duration(hours: 12));
+      previousShiftEnd = shift1Start;
+      previousShiftTitle = "Laporan Shift 2 (Sebelumnya)";
     } else {
-      shift1End = dayStart.add(Duration(hours: shift1EndHour));
+      if (now.isBefore(shift1Start)) {
+        currentShiftStart = shift1Start.subtract(const Duration(hours: 12));
+        currentShiftEnd = shift1Start;
+      } else {
+        currentShiftStart = shift1End;
+        currentShiftEnd = shift1End.add(const Duration(hours: 12));
+      }
+      currentShiftTitle = "Laporan Shift 2 (Saat Ini)";
+
+      previousShiftStart = shift1Start;
+      previousShiftEnd = shift1End;
+      previousShiftTitle = "Laporan Shift 1 (Sebelumnya)";
     }
-    final shift2Start = shift1End;
-    final shift2End = shift1Start.add(const Duration(days: 1));
+
     return ListView(
       padding: const EdgeInsets.all(8.0),
       children: [
-        _buildGeneralReportBody(shift1Start, shift1End,
-            'Laporan Shift 1 (${intl.DateFormat('HH:mm').format(shift1Start)} - ${intl.DateFormat('HH:mm').format(shift1End)})'),
-        const SizedBox(height: 16),
-        _buildGeneralReportBody(shift2Start, shift2End,
-            'Laporan Shift 2 (${intl.DateFormat('HH:mm').format(shift2Start)} - ${intl.DateFormat('HH:mm').format(shift2End)})'),
+        _buildGeneralReportBody(
+            currentShiftStart, currentShiftEnd, currentShiftTitle,
+            isScrollable: false),
+        const SizedBox(height: 24),
+        _buildGeneralReportBody(
+            previousShiftStart, previousShiftEnd, previousShiftTitle,
+            isScrollable: false),
       ],
     );
   }
 
-  Widget _buildGeneralReportBody(DateTime start, DateTime end, String title) {
+  Widget _buildGeneralReportBody(DateTime start, DateTime end, String title,
+      {bool isScrollable = true}) {
     return StreamBuilder<QuerySnapshot>(
-      stream: _firebaseService.getReportStream(start, end),
+      stream: _firebaseService.getFinancialReportStream(start, end),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
         }
-        // --- PERBAIKAN: Melengkapi widget 'tidak ada transaksi' ---
-        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-          return Center(
-            child: Container(
-              padding: const EdgeInsets.all(24),
-              decoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.2),
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Text(
-                'Tidak ada transaksi pada periode:\n$title',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.grey[400], height: 1.5),
-              ),
-            ),
-          );
-        }
-        final docs = snapshot.data!.docs;
-        final transactions =
-            docs.map((doc) => doc.data() as Map<String, dynamic>).toList();
 
-        final totalRevenue = transactions.fold<double>(
-            0, (sum, item) => sum + (item['totalAmount'] ?? 0.0));
+        double totalIncome = 0;
+        double totalExpense = 0;
+        List<Map<String, dynamic>> transactions = [];
+
+        if (snapshot.hasData && snapshot.data!.docs.isNotEmpty) {
+          final docs = snapshot.data!.docs;
+          transactions =
+              docs.map((doc) => doc.data() as Map<String, dynamic>).toList();
+
+          for (var trx in transactions) {
+            if (trx['flow'] == 'income') {
+              totalIncome += (trx['totalAmount'] ?? 0.0);
+            } else if (trx['flow'] == 'expense') {
+              totalExpense += (trx['totalAmount'] ?? 0.0);
+            }
+          }
+        }
+        final double netProfit = totalIncome - totalExpense;
 
         final formatter = intl.NumberFormat.currency(
             locale: 'id_ID', symbol: 'Rp ', decimalDigits: 0);
 
+        // --- PERBAIKAN: Ganti Column dengan ListView jika isScrollable, dan bungkus list dengan Expanded ---
+        final listContent = transactions.isEmpty
+            ? Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24.0),
+                  child: Text('Tidak ada transaksi pada periode ini.',
+                      style: TextStyle(color: Colors.grey[400])),
+                ),
+              )
+            : ListView.builder(
+                // --- PERBAIKAN: Hapus padding di sini, karena sudah ada di parent ---
+                padding: EdgeInsets.zero,
+                shrinkWrap:
+                    !isScrollable, // Hanya shrinkwrap jika tidak di dalam scrollable parent
+                physics: isScrollable
+                    ? const AlwaysScrollableScrollPhysics()
+                    : const NeverScrollableScrollPhysics(),
+                itemCount: transactions.length,
+                itemBuilder: (context, index) {
+                  final trx = transactions[index];
+                  return InkWell(
+                    onTap: () {
+                      showDialog(
+                        context: context,
+                        builder: (_) =>
+                            TransactionDetailDialog(transactionData: trx),
+                      );
+                    },
+                    borderRadius: BorderRadius.circular(12),
+                    child: _buildTransactionDetailCard(trx, formatter),
+                  );
+                },
+              );
+
         return Column(
           children: [
-            // --- PERBAIKAN: Melengkapi widget header laporan ---
             Container(
-              margin:
-                  const EdgeInsets.symmetric(horizontal: 8.0, vertical: 8.0),
+              margin: const EdgeInsets.only(bottom: 8.0),
               padding: const EdgeInsets.all(16.0),
               decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(16),
                   color: Colors.black.withOpacity(0.25),
                   border: Border.all(color: Colors.white.withOpacity(0.2))),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Expanded(
-                    child: Text(
-                      title,
+                  Text(title,
                       style: const TextStyle(
-                          fontWeight: FontWeight.bold, fontSize: 16),
-                    ),
-                  ),
-                  Text(
-                    formatter.format(totalRevenue),
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 18,
-                      color: Colors.cyanAccent,
-                    ),
-                  ),
+                          fontWeight: FontWeight.bold, fontSize: 16)),
+                  const Divider(height: 20, color: Colors.white24),
+                  _buildSummaryRow('Total Pemasukan', totalIncome,
+                      Colors.greenAccent, formatter),
+                  const SizedBox(height: 8),
+                  _buildSummaryRow('Total Pengeluaran', totalExpense,
+                      Colors.redAccent, formatter),
+                  const Divider(height: 20, color: Colors.white24),
+                  _buildSummaryRow(
+                      'Laba Bersih', netProfit, Colors.cyanAccent, formatter,
+                      isLarge: true),
                 ],
               ),
             ),
-            Expanded(
-              child: ListView.builder(
-                padding: const EdgeInsets.symmetric(horizontal: 8.0),
-                itemCount: transactions.length,
-                itemBuilder: (context, index) {
-                  final trx = transactions[index];
-                  return _buildTransactionDetailCard(trx, formatter);
-                },
-              ),
-            ),
-            // --- PERBAIKAN: Melengkapi widget tombol cetak ---
-            if (widget.userRole == 'admin')
-              Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: ElevatedButton.icon(
-                  icon: const Icon(Icons.print),
-                  label: const Text('Cetak Laporan Ini'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.teal.withOpacity(0.8),
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 24, vertical: 12),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12)),
-                  ),
-                  onPressed: () => PdfGenerator.printReport(
-                      title, transactions, totalRevenue),
-                ),
-              ),
+            // --- PERBAIKAN UTAMA: Bungkus daftar dengan Expanded agar tidak overflow ---
+            // Jika tidak scrollable, bungkus dengan container agar tidak error
+            isScrollable ? Expanded(child: listContent) : listContent,
           ],
         );
       },
+    );
+  }
+
+  Widget _buildSummaryRow(
+      String label, double amount, Color color, intl.NumberFormat formatter,
+      {bool isLarge = false}) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(label, style: TextStyle(fontSize: isLarge ? 18 : 14)),
+        Text(
+          formatter.format(amount),
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: isLarge ? 20 : 16,
+            color: color,
+          ),
+        ),
+      ],
     );
   }
 
@@ -280,33 +332,32 @@ class _ReportsPageState extends State<ReportsPage>
       Map<String, dynamic> trx, intl.NumberFormat formatter) {
     final createdAt = (trx['createdAt'] as Timestamp).toDate();
     final type = trx['type'] ?? 'unknown';
-
+    final isIncome = trx['flow'] == 'income';
     String title;
     String subtitle;
     IconData icon;
-    Color iconColor;
 
-    if (type == 'billiard') {
-      title = 'Meja ${trx['tableId']}';
-      final duration = Duration(seconds: trx['durationInSeconds'] ?? 0);
-      final durationString =
-          "${duration.inHours}j ${duration.inMinutes.remainder(60)}m";
-      subtitle =
-          '${intl.DateFormat('dd MMM, HH:mm').format(createdAt)} • $durationString';
-      icon = Icons.pool;
-      iconColor = Colors.cyanAccent;
-    } else if (type == 'pos') {
-      title = 'Transaksi POS';
-      final cashierName = trx['cashierName'] ?? 'N/A';
-      subtitle =
-          '${intl.DateFormat('dd MMM, HH:mm').format(createdAt)} • oleh $cashierName';
-      icon = Icons.point_of_sale;
-      iconColor = Colors.amberAccent;
-    } else {
-      title = 'Transaksi Tidak Dikenal';
-      subtitle = intl.DateFormat('dd MMM, HH:mm').format(createdAt);
-      icon = Icons.help_outline;
-      iconColor = Colors.grey;
+    switch (type) {
+      case 'billiard':
+        title = 'Billing Meja ${trx['tableId']}';
+        final duration = Duration(seconds: trx['durationInSeconds'] ?? 0);
+        subtitle = "${duration.inHours}j ${duration.inMinutes.remainder(60)}m";
+        icon = Icons.pool;
+        break;
+      case 'pos':
+        title = 'Penjualan POS';
+        subtitle = 'oleh ${trx['cashierName']}';
+        icon = Icons.point_of_sale;
+        break;
+      case 'purchase':
+        title = 'Pembelian Stok';
+        subtitle = 'dari ${trx['supplierName']}';
+        icon = Icons.shopping_cart;
+        break;
+      default:
+        title = 'Transaksi Lain';
+        subtitle = 'Tidak diketahui';
+        icon = Icons.receipt;
     }
 
     return Container(
@@ -318,7 +369,9 @@ class _ReportsPageState extends State<ReportsPage>
       ),
       child: Row(
         children: [
-          Icon(icon, color: iconColor, size: 28),
+          Icon(icon,
+              color: isIncome ? Colors.greenAccent : Colors.redAccent,
+              size: 28),
           const SizedBox(width: 16),
           Expanded(
             child: Column(
@@ -329,16 +382,18 @@ class _ReportsPageState extends State<ReportsPage>
                         fontWeight: FontWeight.bold, fontSize: 16)),
                 const SizedBox(height: 4),
                 Text(
-                  subtitle,
+                  '${intl.DateFormat('dd MMM, HH:mm').format(createdAt)} • $subtitle',
                   style: TextStyle(color: Colors.grey[400], fontSize: 12),
                 ),
               ],
             ),
           ),
           Text(
-            formatter.format(trx['totalAmount']),
-            style: const TextStyle(
-                fontSize: 14, color: Colors.white, fontWeight: FontWeight.bold),
+            '${isIncome ? '+' : '-'} ${formatter.format(trx['totalAmount'])}',
+            style: TextStyle(
+                fontSize: 14,
+                color: isIncome ? Colors.greenAccent : Colors.redAccent,
+                fontWeight: FontWeight.bold),
           ),
         ],
       ),

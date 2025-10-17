@@ -1,3 +1,5 @@
+// lib/pages/dashboard/dashboard_page.dart
+
 import 'dart:async';
 import 'dart:ui';
 import 'package:flutter/material.dart';
@@ -10,7 +12,6 @@ import 'package:putra_jaya_billiard/services/firebase_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sliding_up_panel/sliding_up_panel.dart';
 
-// --- Constants ---
 const int numRelays = 32;
 
 class DashboardPage extends StatefulWidget {
@@ -26,8 +27,6 @@ class DashboardPage extends StatefulWidget {
 }
 
 class _DashboardPageState extends State<DashboardPage> {
-  static const String _ratePerHourKey = 'ratePerHour';
-  static const String _ratePerMinuteKey = 'ratePerMinute';
   final ArduinoService _arduinoService = ArduinoService();
   final FirebaseService _firebaseService = FirebaseService();
   List<String> _availablePorts = [];
@@ -57,6 +56,45 @@ class _DashboardPageState extends State<DashboardPage> {
     super.dispose();
   }
 
+  Future<void> _finalizeAndSaveBill(int mejaId) async {
+    final startTime = _activeSessions[mejaId];
+    if (startTime == null) {
+      _addLog('Peringatan: Sesi Meja $mejaId tidak ditemukan.');
+      _setRelayStateToOff(mejaId);
+      return;
+    }
+    final endTime = DateTime.now();
+    final duration = endTime.difference(startTime);
+    final cost = _calculateCost(duration);
+
+    _addLog(
+      'Sesi Meja $mejaId selesai. Durasi: ${duration.inMinutes} menit. Biaya: Rp${cost.toStringAsFixed(0)}',
+    );
+
+    final transaction = BillingTransaction(
+      tableId: mejaId,
+      startTime: startTime,
+      endTime: endTime,
+      durationInSeconds: duration.inSeconds,
+      totalCost: cost,
+    );
+
+    try {
+      // --- PENYESUAIAN DI SINI ---
+      // Memanggil fungsi baru 'saveBillingTransaction' dan menyertakan data 'widget.user'
+      await _firebaseService.saveBillingTransaction(transaction, widget.user);
+      _addLog('Transaksi Meja $mejaId berhasil disimpan ke Firebase.');
+    } catch (e) {
+      _addLog('Error menyimpan ke Firebase: $e');
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _activeSessions.remove(mejaId);
+    });
+    _setRelayStateToOff(mejaId);
+  }
+
   void _initRelayStates() {
     for (int i = 1; i <= numRelays; i++) {
       _relayStates[i] = RelayData(id: i);
@@ -67,8 +105,8 @@ class _DashboardPageState extends State<DashboardPage> {
     final prefs = await SharedPreferences.getInstance();
     if (!mounted) return;
     setState(() {
-      _ratePerHour = prefs.getDouble(_ratePerHourKey) ?? 50000.0;
-      _ratePerMinute = prefs.getDouble(_ratePerMinuteKey) ?? 0;
+      _ratePerHour = prefs.getDouble('ratePerHour') ?? 50000.0;
+      _ratePerMinute = prefs.getDouble('ratePerMinute') ?? 0;
     });
     _addLog('Harga dimuat: Rp$_ratePerHour/jam, Rp$_ratePerMinute/menit');
   }
@@ -123,45 +161,6 @@ class _DashboardPageState extends State<DashboardPage> {
       _activeSessions[mejaId] = DateTime.now();
     });
     _addLog('Sesi billing Meja $mejaId dimulai.');
-  }
-
-  Future<void> _finalizeAndSaveBill(int mejaId) async {
-    final startTime = _activeSessions[mejaId];
-    if (startTime == null) {
-      _addLog('Peringatan: Sesi Meja $mejaId tidak ditemukan.');
-      _setRelayStateToOff(mejaId);
-      return;
-    }
-    final endTime = DateTime.now();
-    final duration = endTime.difference(startTime);
-    final cost = _calculateCost(duration);
-
-    _addLog(
-      'Sesi Meja $mejaId selesai. Durasi: ${duration.inMinutes} menit. Biaya: Rp${cost.toStringAsFixed(0)}',
-    );
-
-    final transaction = BillingTransaction(
-      tableId: mejaId,
-      startTime: startTime,
-      endTime: endTime,
-      durationInSeconds: duration.inSeconds,
-      totalCost: cost,
-    );
-
-    try {
-      // --- PENYESUAIAN DI SINI ---
-      // Ganti saveTransaction menjadi saveBillingTransaction dan tambahkan user
-      await _firebaseService.saveBillingTransaction(transaction, widget.user);
-      _addLog('Transaksi Meja $mejaId berhasil disimpan ke Firebase.');
-    } catch (e) {
-      _addLog('Error menyimpan ke Firebase: $e');
-    }
-
-    if (!mounted) return;
-    setState(() {
-      _activeSessions.remove(mejaId);
-    });
-    _setRelayStateToOff(mejaId);
   }
 
   void _turnOnRelay(int mejaId) {

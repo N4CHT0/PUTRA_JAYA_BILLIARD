@@ -2,13 +2,18 @@ import 'package:flutter/material.dart';
 import 'package:putra_jaya_billiard/models/user_model.dart';
 import 'package:putra_jaya_billiard/pages/accounts/accounts_page.dart';
 import 'package:putra_jaya_billiard/pages/dashboard/dashboard_page.dart';
-import 'package:putra_jaya_billiard/pages/products/products_page.dart'; // <-- Pastikan import ini ada
+import 'package:putra_jaya_billiard/pages/pos/pos_page.dart';
+import 'package:putra_jaya_billiard/pages/products/products_page.dart';
+import 'package:putra_jaya_billiard/pages/purchases/purchase_page.dart';
 import 'package:putra_jaya_billiard/pages/reports/reports_page.dart';
 import 'package:putra_jaya_billiard/pages/settings/settings_page.dart';
+import 'package:putra_jaya_billiard/pages/stocks/stock_card_page.dart';
+import 'package:putra_jaya_billiard/pages/stocks/stock_report_page.dart';
+import 'package:putra_jaya_billiard/pages/stocks/stocks_opname_page.dart';
+import 'package:putra_jaya_billiard/pages/suppliers/suppliers_pages.dart';
 import 'package:putra_jaya_billiard/pages/transactions/transactions_page.dart';
 import 'package:putra_jaya_billiard/widgets/app_drawer.dart';
 import 'package:putra_jaya_billiard/widgets/custom_app_bar.dart';
-import 'package:putra_jaya_billiard/pages/pos/pos_page.dart';
 
 class MainLayout extends StatefulWidget {
   final UserModel user;
@@ -20,37 +25,48 @@ class MainLayout extends StatefulWidget {
 
 class _MainLayoutState extends State<MainLayout> {
   int _selectedIndex = 0;
-  late final List<Widget> _pages;
+  final Map<int, Widget> _pageMap = {};
 
   @override
   void initState() {
     super.initState();
-    _pages = [
-      DashboardPage(user: widget.user), // Index 0
-      ReportsPage(userRole: widget.user.role), // Index 1
-      if (widget.user.role == 'admin') ...[
-        AccountsPage(admin: widget.user), // Index 2
-        const TransactionsPage(), // Index 3
-        const SettingsPage(), // Index 4
-        const ProductsPage(), // Index 5
-        PosPage(
-            currentUser:
-                widget.user), // <-- Tambahkan halaman POS di sini (Index 6)
-      ],
-    ];
+    _buildPages();
   }
 
-  void _onPageSelected(int index) {
-    // Cek keamanan sederhana agar tidak error jika indeks di luar jangkauan
-    if (index < _pages.length) {
-      setState(() {
-        _selectedIndex = index;
-      });
+  void _buildPages() {
+    _pageMap[0] = DashboardPage(user: widget.user);
+    _pageMap[1] = ReportsPage(userRole: widget.user.role);
+    _pageMap[6] = PosPage(currentUser: widget.user);
+    _pageMap[8] = PurchasePage(currentUser: widget.user);
+    _pageMap[9] = const StockReportPage();
+    _pageMap[11] = const StockCardPage();
+
+    if (widget.user.role == 'admin') {
+      _pageMap[2] = AccountsPage(admin: widget.user);
+      _pageMap[3] = const TransactionsPage();
+      _pageMap[4] = SettingsPage(onSaveComplete: _switchToDashboard);
+      _pageMap[5] = const ProductsPage();
+      _pageMap[7] = const SuppliersPage();
+      _pageMap[10] = StockOpnamePage(currentUser: widget.user);
     }
   }
 
-  void _handleSettingsChanged() {
-    print("Settings changed, potentially reload rates here.");
+  void _switchToDashboard() {
+    setState(() {
+      _selectedIndex = 0;
+    });
+  }
+
+  void _onPageSelected(int index) {
+    if (_pageMap.containsKey(index)) {
+      setState(() {
+        _selectedIndex = index;
+      });
+    } else {
+      setState(() {
+        _selectedIndex = 0;
+      });
+    }
   }
 
   @override
@@ -59,8 +75,8 @@ class _MainLayoutState extends State<MainLayout> {
       extendBodyBehindAppBar: true,
       appBar: CustomAppBar(
         user: widget.user,
-        onSettingsChanged: _handleSettingsChanged,
-        onGoHome: () => _onPageSelected(0), // Kembali ke dashboard (index 0)
+        onSettingsChanged: () {},
+        onGoHome: _switchToDashboard,
       ),
       drawer: AppDrawer(user: widget.user, onPageSelected: _onPageSelected),
       body: Container(
@@ -71,10 +87,21 @@ class _MainLayoutState extends State<MainLayout> {
             end: Alignment.bottomRight,
           ),
         ),
-        // Gunakan IndexedStack agar state halaman tidak hilang saat berpindah
         child: IndexedStack(
           index: _selectedIndex,
-          children: _pages,
+          children: List.generate(
+            12,
+            (index) =>
+                _pageMap[index] ??
+                Container(
+                  color: Colors.transparent,
+                  child: Center(
+                    child: Text(
+                        "Halaman untuk indeks $index tidak tersedia untuk role Anda.",
+                        style: TextStyle(color: Colors.white54)),
+                  ),
+                ),
+          ),
         ),
       ),
     );
