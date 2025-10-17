@@ -1,13 +1,14 @@
 // lib/services/auth_service.dart
+
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart'; // <-- Butuh untuk Size
+import 'package:window_manager/window_manager.dart'; // <-- 1. IMPORT PACKAGE
 
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
-  /// Stream untuk memantau perubahan status autentikasi (login/logout)
   Stream<User?> get authStateChanges => _auth.authStateChanges();
 
-  /// Fungsi untuk login dengan email dan password
   Future<User?> signInWithEmailAndPassword(
       String email, String password) async {
     try {
@@ -17,7 +18,6 @@ class AuthService {
       );
       return result.user;
     } on FirebaseAuthException catch (e) {
-      // Menampilkan pesan error yang lebih spesifik
       print('Error Login: ${e.message}');
       return null;
     }
@@ -25,6 +25,19 @@ class AuthService {
 
   /// Fungsi untuk logout
   Future<void> signOut() async {
-    await _auth.signOut();
+    try {
+      // --- 2. LOGIKA KELUAR FULLSCREEN DITEMPATKAN DI SINI ---
+      // Keluar dari mode fullscreen terlebih dahulu
+      await windowManager.setFullScreen(false);
+      // Opsional: Kembalikan ukuran jendela ke ukuran login
+      await windowManager.setSize(const Size(1024, 650));
+      await windowManager.center();
+      // --- SELESAI ---
+
+      // Setelah jendela kembali normal, baru proses logout Firebase
+      await _auth.signOut();
+    } catch (e) {
+      print("Error during sign out: $e");
+    }
   }
 }

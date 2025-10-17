@@ -1,20 +1,22 @@
-// file: lib/widgets/custom_app_bar.dart
-
 import 'package:flutter/material.dart';
 import 'package:putra_jaya_billiard/models/user_model.dart';
 import 'package:putra_jaya_billiard/services/auth_service.dart';
+import 'package:window_manager/window_manager.dart';
 
-// Gunakan 'implements PreferredSizeWidget' agar bisa dipakai di Scaffold.appBar
 class CustomAppBar extends StatelessWidget implements PreferredSizeWidget {
   final UserModel user;
   final VoidCallback onSettingsChanged;
-  final VoidCallback onGoHome; // Definisikan parameter di sini
+  final VoidCallback onGoHome;
+  final VoidCallback onGoToPOS;
+  final VoidCallback onToggleFullscreen;
 
   const CustomAppBar({
     super.key,
     required this.user,
     required this.onSettingsChanged,
-    required this.onGoHome, // Tambahkan ke constructor
+    required this.onGoHome,
+    required this.onGoToPOS,
+    required this.onToggleFullscreen,
   });
 
   @override
@@ -23,8 +25,7 @@ class CustomAppBar extends StatelessWidget implements PreferredSizeWidget {
     final userRole = user.role;
 
     return AppBar(
-      backgroundColor:
-          Colors.transparent, // Transparan agar gradasi body terlihat
+      backgroundColor: Colors.transparent,
       elevation: 0,
       title: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -42,19 +43,14 @@ class CustomAppBar extends StatelessWidget implements PreferredSizeWidget {
       ),
       actions: [
         IconButton(
-          icon: const Icon(Icons.point_of_sale), // Ikon mesin kasir
+          icon: const Icon(Icons.point_of_sale),
           tooltip: 'Sistem POS',
-          onPressed: () {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                  content: Text('Halaman POS belum diimplementasikan.')),
-            );
-          },
+          onPressed: onGoToPOS,
         ),
         IconButton(
-          icon: const Icon(Icons.home), // Ikon Beranda
-          tooltip: 'Dashboard',
-          onPressed: onGoHome, // Gunakan parameter di sini
+          icon: const Icon(Icons.casino),
+          tooltip: 'Biliard Billing',
+          onPressed: onGoHome,
         ),
         IconButton(
           icon: const Icon(Icons.logout),

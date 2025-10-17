@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart' as intl;
 import 'package:putra_jaya_billiard/models/billing_transaction.dart';
@@ -9,6 +8,11 @@ import 'package:putra_jaya_billiard/services/arduino_service.dart';
 import 'package:putra_jaya_billiard/services/firebase_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sliding_up_panel/sliding_up_panel.dart';
+
+// Import the new custom widgets
+import 'widgets/billiard_table_card.dart';
+import 'widgets/connection_panel.dart';
+import 'widgets/log_panel.dart';
 
 // --- Constants ---
 const int numRelays = 32;
@@ -26,6 +30,7 @@ class DashboardPage extends StatefulWidget {
 }
 
 class _DashboardPageState extends State<DashboardPage> {
+  // --- State Properties ---
   static const String _ratePerHourKey = 'ratePerHour';
   static const String _ratePerMinuteKey = 'ratePerMinute';
   final ArduinoService _arduinoService = ArduinoService();
@@ -39,6 +44,7 @@ class _DashboardPageState extends State<DashboardPage> {
   double _ratePerMinute = 0.0;
   final ScrollController _logScrollController = ScrollController();
 
+  // --- Lifecycle Methods ---
   @override
   void initState() {
     super.initState();
@@ -56,6 +62,69 @@ class _DashboardPageState extends State<DashboardPage> {
     _logScrollController.dispose();
     super.dispose();
   }
+
+  // --- UI Build Method ---
+  @override
+  Widget build(BuildContext context) {
+    final screenHeight = MediaQuery.of(context).size.height;
+    final double panelMinHeight = screenHeight * 0.1;
+
+    return SlidingUpPanel(
+      panel: LogPanel(
+        logScrollController: _logScrollController,
+        logMessages: _logMessages,
+        onClearLogs: () => setState(() => _logMessages = ''),
+      ),
+      collapsed: LogPanel.buildCollapsed(),
+      minHeight: panelMinHeight,
+      maxHeight: screenHeight * 0.6,
+      color: Colors.transparent,
+      body: SafeArea(
+        bottom: false,
+        child: Column(
+          children: [
+            ConnectionPanel(
+              isConnected: _arduinoService.isConnected,
+              connectedPortName: _arduinoService.connectedPortName,
+              availablePorts: _availablePorts,
+              onRefreshPorts: _initPorts,
+              onConnect: _connectSerialPort,
+              onDisconnect: _disconnectSerialPort,
+            ),
+            Expanded(
+              child: GridView.builder(
+                padding: EdgeInsets.fromLTRB(16, 16, 16, panelMinHeight + 16),
+                gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                  maxCrossAxisExtent: 380,
+                  childAspectRatio: 1.7,
+                  crossAxisSpacing: 16,
+                  mainAxisSpacing: 16,
+                ),
+                itemCount: numRelays,
+                itemBuilder: (context, index) {
+                  final mejaId = index + 1;
+                  final relay = _relayStates[mejaId]!;
+                  final bool isSessionActive =
+                      _activeSessions.containsKey(mejaId);
+                  return BilliardTableCard(
+                    mejaId: mejaId,
+                    relay: relay,
+                    isSessionActive: isSessionActive,
+                    onTurnOn: () => _turnOnRelay(mejaId),
+                    onSetTimer: () => _showSetTimerDialog(mejaId),
+                    onFinalizeAndPay: () => _showConfirmationDialog(mejaId),
+                    onCancelSession: () => _cancelSessionAndTurnOff(mejaId),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // --- Business Logic & State Management Functions ---
 
   void _initRelayStates() {
     for (int i = 1; i <= numRelays; i++) {
@@ -149,8 +218,6 @@ class _DashboardPageState extends State<DashboardPage> {
     );
 
     try {
-      // --- PENYESUAIAN DI SINI ---
-      // Ganti saveTransaction menjadi saveBillingTransaction dan tambahkan user
       await _firebaseService.saveBillingTransaction(transaction, widget.user);
       _addLog('Transaksi Meja $mejaId berhasil disimpan ke Firebase.');
     } catch (e) {
@@ -376,6 +443,8 @@ class _DashboardPageState extends State<DashboardPage> {
     }
   }
 
+  // --- Helper & Utility Functions ---
+
   String _formatDuration(int totalSeconds) {
     final duration = Duration(seconds: totalSeconds);
     String twoDigits(int n) => n.toString().padLeft(2, '0');
@@ -394,363 +463,5 @@ class _DashboardPageState extends State<DashboardPage> {
   double _calculateCost(Duration duration) {
     return (duration.inHours * _ratePerHour) +
         (duration.inMinutes.remainder(60) * _ratePerMinute);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final screenHeight = MediaQuery.of(context).size.height;
-    final double panelMinHeight = screenHeight * 0.1;
-
-    return SlidingUpPanel(
-      panel: _buildLogPanel(),
-      collapsed: _buildCollapsedPanel(),
-      minHeight: panelMinHeight,
-      maxHeight: screenHeight * 0.6,
-      color: Colors.transparent,
-      body: SafeArea(
-        bottom: false,
-        child: Column(
-          children: [
-            _buildConnectionStatusPanel(),
-            Expanded(
-              child: GridView.builder(
-                padding: EdgeInsets.fromLTRB(16, 16, 16, panelMinHeight + 16),
-                gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                  maxCrossAxisExtent: 380,
-                  childAspectRatio: 1.7,
-                  crossAxisSpacing: 16,
-                  mainAxisSpacing: 16,
-                ),
-                itemCount: numRelays,
-                itemBuilder: (context, index) {
-                  final mejaId = index + 1;
-                  final relay = _relayStates[mejaId]!;
-                  final bool isSessionActive =
-                      _activeSessions.containsKey(mejaId);
-                  return _buildGlassCard(mejaId, relay, isSessionActive);
-                },
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildConnectionStatusPanel() {
-    final isConnected = _arduinoService.isConnected;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      decoration: BoxDecoration(
-        color: const Color.fromARGB(51, 0, 0, 0),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Row(
-            children: [
-              Icon(
-                isConnected ? Icons.check_circle : Icons.error,
-                color: isConnected ? Colors.greenAccent : Colors.redAccent,
-                size: 18,
-              ),
-              const SizedBox(width: 8),
-              Text(
-                isConnected
-                    ? 'Terhubung: ${_arduinoService.connectedPortName}'
-                    : 'Tidak Terhubung',
-              ),
-            ],
-          ),
-          if (!isConnected)
-            Row(
-              children: [
-                IconButton(
-                  icon: const Icon(Icons.refresh, size: 20),
-                  onPressed: _initPorts,
-                  tooltip: 'Refresh Port List',
-                ),
-                DropdownButtonHideUnderline(
-                  child: DropdownButton<String>(
-                    value: null,
-                    hint: const Text('Pilih Port'),
-                    items: _availablePorts
-                        .map<DropdownMenuItem<String>>((String port) {
-                      return DropdownMenuItem<String>(
-                        value: port,
-                        child: Text(port),
-                      );
-                    }).toList(),
-                    onChanged: (String? newValue) {
-                      if (newValue != null) {
-                        _connectSerialPort(newValue);
-                      }
-                    },
-                  ),
-                ),
-              ],
-            )
-          else
-            TextButton.icon(
-              onPressed: _disconnectSerialPort,
-              icon: const Icon(Icons.close, size: 16),
-              label: const Text('Putuskan'),
-              style: TextButton.styleFrom(foregroundColor: Colors.redAccent),
-            ),
-        ],
-      ),
-    );
-  }
-
-  ({String statusText, List<Color> gradientColors, Color statusColor})
-      _getCardStyle(RelayData relay) {
-    switch (relay.status) {
-      case RelayStatus.on:
-        return (
-          statusText: 'ON (Personal)',
-          gradientColors: [const Color(0xff22c1c3), const Color(0xfffdbb2d)],
-          statusColor: Colors.greenAccent
-        );
-      case RelayStatus.timer:
-        final bool isWarning =
-            relay.remainingTimeSeconds <= 300 && relay.remainingTimeSeconds > 0;
-        return (
-          statusText: 'TIMER: ${_formatDuration(relay.remainingTimeSeconds)}',
-          gradientColors: isWarning
-              ? [const Color(0xffd66d75), const Color(0xffe29587)]
-              : [const Color(0xfff3904f), const Color(0xff3b4371)],
-          statusColor: isWarning ? Colors.orangeAccent : Colors.cyanAccent
-        );
-      case RelayStatus.timeUp:
-        return (
-          statusText: 'WAKTU HABIS',
-          gradientColors: [const Color(0xffcb2d3e), const Color(0xffef473a)],
-          statusColor: Colors.redAccent
-        );
-      case RelayStatus.off:
-        return (
-          statusText: 'OFF',
-          gradientColors: [
-            const Color.fromARGB(26, 255, 255, 255),
-            const Color.fromARGB(13, 255, 255, 255),
-          ],
-          statusColor: Colors.grey.shade600
-        );
-    }
-  }
-
-  Widget _buildGlassCard(int mejaId, RelayData relay, bool isSessionActive) {
-    final style = _getCardStyle(relay);
-
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(24),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-        child: Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: style.gradientColors,
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(color: const Color.fromARGB(51, 255, 255, 255)),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Meja $mejaId',
-                  style: const TextStyle(
-                      fontSize: 24, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  style.statusText,
-                  style: TextStyle(fontSize: 16, color: style.statusColor),
-                ),
-                const Spacer(),
-                if (isSessionActive)
-                  Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton.icon(
-                          icon: const Icon(Icons.check_circle),
-                          label: const Text('Selesaikan & Bayar'),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor:
-                                const Color.fromARGB(204, 0, 150, 136),
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12)),
-                          ),
-                          onPressed: () => _showConfirmationDialog(mejaId),
-                        ),
-                      ),
-                      SizedBox(
-                        height: 28,
-                        child: TextButton(
-                          child: const Text('Batalkan Sesi',
-                              style: TextStyle(color: Colors.white70)),
-                          onPressed: () => _cancelSessionAndTurnOff(mejaId),
-                        ),
-                      )
-                    ],
-                  )
-                else
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      _buildControlButton(
-                        Icons.play_arrow,
-                        'Nyalakan (Personal)',
-                        () => _turnOnRelay(mejaId),
-                      ),
-                      const SizedBox(width: 12),
-                      _buildControlButton(
-                        Icons.timer,
-                        'Set Timer',
-                        () => _showSetTimerDialog(mejaId),
-                      ),
-                    ],
-                  ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildControlButton(
-      IconData icon, String tooltip, VoidCallback onPressed) {
-    return Tooltip(
-      message: tooltip,
-      child: InkWell(
-        onTap: onPressed,
-        borderRadius: BorderRadius.circular(50),
-        child: Container(
-          padding: const EdgeInsets.all(10),
-          decoration: const BoxDecoration(
-            color: Color.fromARGB(64, 0, 0, 0),
-            shape: BoxShape.circle,
-          ),
-          child: Icon(icon, color: Colors.white, size: 24),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildLogPanel() {
-    return ClipRRect(
-      borderRadius: const BorderRadius.only(
-        topLeft: Radius.circular(24.0),
-        topRight: Radius.circular(24.0),
-      ),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
-        child: Container(
-          decoration: const BoxDecoration(
-            color: Color.fromARGB(77, 0, 0, 0),
-            borderRadius: BorderRadius.only(
-              topLeft: Radius.circular(24.0),
-              topRight: Radius.circular(24.0),
-            ),
-          ),
-          child: Column(
-            children: [
-              Container(
-                width: 40,
-                height: 5,
-                margin: const EdgeInsets.symmetric(vertical: 10.0),
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade700,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text('Log Komunikasi',
-                        style: TextStyle(
-                            fontWeight: FontWeight.bold, fontSize: 16)),
-                    TextButton(
-                      onPressed: () => setState(() => _logMessages = ''),
-                      child: const Text('Clear'),
-                    ),
-                  ],
-                ),
-              ),
-              const Divider(height: 1, color: Colors.white24),
-              Expanded(
-                child: SingleChildScrollView(
-                  controller: _logScrollController,
-                  reverse: true,
-                  child: Padding(
-                    padding: const EdgeInsets.all(12.0),
-                    child: Text(
-                      _logMessages,
-                      style: const TextStyle(
-                        fontFamily: 'monospace',
-                        fontSize: 12,
-                        color: Colors.white70,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildCollapsedPanel() {
-    return ClipRRect(
-      borderRadius: const BorderRadius.only(
-        topLeft: Radius.circular(24.0),
-        topRight: Radius.circular(24.0),
-      ),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
-        child: Container(
-          decoration: const BoxDecoration(
-            color: Color.fromARGB(77, 0, 0, 0),
-            borderRadius: BorderRadius.only(
-              topLeft: Radius.circular(24.0),
-              topRight: Radius.circular(24.0),
-            ),
-          ),
-          child: Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Container(
-                  width: 40,
-                  height: 5,
-                  margin: const EdgeInsets.only(bottom: 8.0),
-                  decoration: BoxDecoration(
-                    color: Colors.grey.shade700,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-                const Text(
-                  "Log Komunikasi",
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
   }
 }

@@ -1,14 +1,17 @@
+// lib/pages/main_layouts.dart
+
 import 'package:flutter/material.dart';
 import 'package:putra_jaya_billiard/models/user_model.dart';
 import 'package:putra_jaya_billiard/pages/accounts/accounts_page.dart';
 import 'package:putra_jaya_billiard/pages/dashboard/dashboard_page.dart';
-import 'package:putra_jaya_billiard/pages/products/products_page.dart'; // <-- Pastikan import ini ada
+import 'package:putra_jaya_billiard/pages/pos/pos_page.dart';
+import 'package:putra_jaya_billiard/pages/products/products_page.dart';
 import 'package:putra_jaya_billiard/pages/reports/reports_page.dart';
 import 'package:putra_jaya_billiard/pages/settings/settings_page.dart';
 import 'package:putra_jaya_billiard/pages/transactions/transactions_page.dart';
 import 'package:putra_jaya_billiard/widgets/app_drawer.dart';
 import 'package:putra_jaya_billiard/widgets/custom_app_bar.dart';
-import 'package:putra_jaya_billiard/pages/pos/pos_page.dart';
+import 'package:window_manager/window_manager.dart'; // <-- 1. IMPORT YANG HILANG
 
 class MainLayout extends StatefulWidget {
   final UserModel user;
@@ -33,15 +36,18 @@ class _MainLayoutState extends State<MainLayout> {
         const TransactionsPage(), // Index 3
         const SettingsPage(), // Index 4
         const ProductsPage(), // Index 5
-        PosPage(
-            currentUser:
-                widget.user), // <-- Tambahkan halaman POS di sini (Index 6)
+        PosPage(currentUser: widget.user), // Index 6
       ],
     ];
   }
 
+  // Fungsi ini sudah benar
+  void _toggleNativeFullscreen() async {
+    bool isFull = await windowManager.isFullScreen();
+    windowManager.setFullScreen(!isFull);
+  }
+
   void _onPageSelected(int index) {
-    // Cek keamanan sederhana agar tidak error jika indeks di luar jangkauan
     if (index < _pages.length) {
       setState(() {
         _selectedIndex = index;
@@ -60,7 +66,21 @@ class _MainLayoutState extends State<MainLayout> {
       appBar: CustomAppBar(
         user: widget.user,
         onSettingsChanged: _handleSettingsChanged,
-        onGoHome: () => _onPageSelected(0), // Kembali ke dashboard (index 0)
+        onGoHome: () => _onPageSelected(0),
+        onGoToPOS: () {
+          if (widget.user.role == 'admin') {
+            _onPageSelected(6);
+          } else {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Anda tidak memiliki akses ke halaman POS.'),
+                backgroundColor: Colors.redAccent,
+              ),
+            );
+          }
+        },
+        // --- 2. HUBUNGKAN FUNGSI FULLSCREEN DI SINI ---
+        onToggleFullscreen: _toggleNativeFullscreen,
       ),
       drawer: AppDrawer(user: widget.user, onPageSelected: _onPageSelected),
       body: Container(
@@ -71,7 +91,6 @@ class _MainLayoutState extends State<MainLayout> {
             end: Alignment.bottomRight,
           ),
         ),
-        // Gunakan IndexedStack agar state halaman tidak hilang saat berpindah
         child: IndexedStack(
           index: _selectedIndex,
           children: _pages,

@@ -3,8 +3,7 @@ import 'package:putra_jaya_billiard/models/user_model.dart';
 
 class AppDrawer extends StatelessWidget {
   final UserModel user;
-  final Function(int)
-      onPageSelected; // Callback untuk memberitahu halaman mana yang dipilih
+  final Function(int) onPageSelected;
 
   const AppDrawer({
     super.key,
@@ -32,23 +31,8 @@ class AppDrawer extends StatelessWidget {
                 color: Color(0xFF1a1a2e),
               ),
             ),
-            ListTile(
-              leading: const Icon(Icons.dashboard_rounded),
-              title: const Text('Dashboard'),
-              onTap: () {
-                onPageSelected(0); // Index 0 untuk Dashboard
-                Navigator.pop(context); // Tutup drawer
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.point_of_sale_rounded),
-              title: const Text('Point of Sale (POS)'),
-              onTap: () {
-                // Arahkan ke halaman POS
-                onPageSelected(6); // <-- Ganti ke indeks baru (6)
-                Navigator.pop(context);
-              },
-            ),
+            // Dihapus: ListTile untuk Dashboard tidak lagi diperlukan di sini.
+            // Dihapus: ListTile untuk Point of Sale (POS) tidak lagi diperlukan di sini.
             ListTile(
               leading: const Icon(Icons.bar_chart_rounded),
               title: const Text('Laporan Pendapatan'),
