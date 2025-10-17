@@ -15,7 +15,6 @@ class AppDrawer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Fungsi helper untuk menangani navigasi dan menutup drawer
     void handleNavigation(int index) {
       onPageSelected(index);
       Navigator.pop(context);

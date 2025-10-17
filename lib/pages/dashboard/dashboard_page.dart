@@ -11,11 +11,7 @@ import 'package:putra_jaya_billiard/services/firebase_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sliding_up_panel/sliding_up_panel.dart';
 
-// Import widget-widget baru
-import 'widgets/billiard_table_card.dart';
-import 'widgets/connection_panel.dart';
-import 'widgets/log_panel.dart';
-
+// --- Constants ---
 const int numRelays = 32;
 
 class DashboardPage extends StatefulWidget {
@@ -31,7 +27,8 @@ class DashboardPage extends StatefulWidget {
 }
 
 class _DashboardPageState extends State<DashboardPage> {
-  // --- STATE AND SERVICES ---
+  static const String _ratePerHourKey = 'ratePerHour';
+  static const String _ratePerMinuteKey = 'ratePerMinute';
   final ArduinoService _arduinoService = ArduinoService();
   final FirebaseService _firebaseService = FirebaseService();
   List<String> _availablePorts = [];
@@ -64,13 +61,18 @@ class _DashboardPageState extends State<DashboardPage> {
 
   Future<void> _finalizeAndSaveBill(int mejaId) async {
     final startTime = _activeSessions[mejaId];
-    if (startTime == null) return;
+    if (startTime == null) {
+      _addLog('Peringatan: Sesi Meja $mejaId tidak ditemukan.');
+      _setRelayStateToOff(mejaId);
+      return;
+    }
     final endTime = DateTime.now();
     final duration = endTime.difference(startTime);
     final cost = _calculateCost(duration);
 
     _addLog(
-        'Sesi Meja $mejaId selesai. Durasi: ${duration.inMinutes} menit. Biaya: Rp${cost.toStringAsFixed(0)}');
+      'Sesi Meja $mejaId selesai. Durasi: ${duration.inMinutes} menit. Biaya: Rp${cost.toStringAsFixed(0)}',
+    );
 
     final transaction = BillingTransaction(
       tableId: mejaId,
@@ -81,6 +83,8 @@ class _DashboardPageState extends State<DashboardPage> {
     );
 
     try {
+      // --- PENYESUAIAN DI SINI ---
+      // Memanggil fungsi baru 'saveBillingTransaction' dan menyertakan data 'widget.user'
       await _firebaseService.saveBillingTransaction(transaction, widget.user);
       _addLog('Transaksi Meja $mejaId berhasil disimpan ke Firebase.');
     } catch (e) {
@@ -88,7 +92,9 @@ class _DashboardPageState extends State<DashboardPage> {
     }
 
     if (!mounted) return;
-    setState(() => _activeSessions.remove(mejaId));
+    setState(() {
+      _activeSessions.remove(mejaId);
+    });
     _setRelayStateToOff(mejaId);
   }
 

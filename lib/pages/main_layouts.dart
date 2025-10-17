@@ -9,12 +9,13 @@ import 'package:putra_jaya_billiard/pages/reports/reports_page.dart';
 import 'package:putra_jaya_billiard/pages/reports/stock_report_page.dart';
 import 'package:putra_jaya_billiard/pages/settings/settings_page.dart';
 import 'package:putra_jaya_billiard/pages/stocks/stock_card_page.dart';
+import 'package:putra_jaya_billiard/pages/stocks/stock_report_page.dart';
 import 'package:putra_jaya_billiard/pages/stocks/stocks_opname_page.dart';
 import 'package:putra_jaya_billiard/pages/suppliers/suppliers_pages.dart';
 import 'package:putra_jaya_billiard/pages/transactions/transactions_page.dart';
 import 'package:putra_jaya_billiard/widgets/app_drawer.dart';
 import 'package:putra_jaya_billiard/widgets/custom_app_bar.dart';
-import 'package:window_manager/window_manager.dart';
+import 'package:putra_jaya_billiard/pages/pos/pos_page.dart';
 
 class MainLayout extends StatefulWidget {
   final UserModel user;
@@ -35,7 +36,6 @@ class _MainLayoutState extends State<MainLayout> {
   }
 
   void _buildPages() {
-    // Halaman yang bisa diakses semua role
     _pageMap[0] = DashboardPage(user: widget.user);
     _pageMap[1] = ReportsPage(userRole: widget.user.role);
     _pageMap[6] = PosPage(currentUser: widget.user);
@@ -43,7 +43,6 @@ class _MainLayoutState extends State<MainLayout> {
     _pageMap[9] = const StockReportPage();
     _pageMap[11] = const StockCardPage();
 
-    // Halaman khusus admin
     if (widget.user.role == 'admin') {
       _pageMap[2] = AccountsPage(admin: widget.user);
       _pageMap[3] = const TransactionsPage();
@@ -72,9 +71,8 @@ class _MainLayoutState extends State<MainLayout> {
     }
   }
 
-  void _toggleNativeFullscreen() async {
-    bool isFull = await windowManager.isFullScreen();
-    windowManager.setFullScreen(!isFull);
+  void _handleSettingsChanged() {
+    print("Settings changed, potentially reload rates here.");
   }
 
   @override
@@ -85,8 +83,6 @@ class _MainLayoutState extends State<MainLayout> {
         user: widget.user,
         onSettingsChanged: () {},
         onGoHome: _switchToDashboard,
-        onGoToPOS: () => _onPageSelected(6),
-        onToggleFullscreen: _toggleNativeFullscreen,
       ),
       drawer: AppDrawer(user: widget.user, onPageSelected: _onPageSelected),
       body: Container(
@@ -99,19 +95,7 @@ class _MainLayoutState extends State<MainLayout> {
         ),
         child: IndexedStack(
           index: _selectedIndex,
-          children: List.generate(
-            12,
-            (index) =>
-                _pageMap[index] ??
-                // --- PERBAIKAN UTAMA DI SINI ---
-                // Menambahkan 'const' pada widget yang tidak akan pernah berubah
-                const Center(
-                  child: Text(
-                    "Halaman tidak tersedia untuk role Anda.",
-                    style: TextStyle(color: Colors.white54),
-                  ),
-                ),
-          ),
+          children: _pages,
         ),
       ),
     );
