@@ -6,7 +6,6 @@ import 'package:putra_jaya_billiard/pages/pos/pos_page.dart';
 import 'package:putra_jaya_billiard/pages/products/products_page.dart';
 import 'package:putra_jaya_billiard/pages/purchases/purchase_page.dart';
 import 'package:putra_jaya_billiard/pages/reports/reports_page.dart';
-import 'package:putra_jaya_billiard/pages/reports/stock_report_page.dart';
 import 'package:putra_jaya_billiard/pages/settings/settings_page.dart';
 import 'package:putra_jaya_billiard/pages/stocks/stock_card_page.dart';
 import 'package:putra_jaya_billiard/pages/stocks/stock_report_page.dart';
@@ -15,7 +14,7 @@ import 'package:putra_jaya_billiard/pages/suppliers/suppliers_pages.dart';
 import 'package:putra_jaya_billiard/pages/transactions/transactions_page.dart';
 import 'package:putra_jaya_billiard/widgets/app_drawer.dart';
 import 'package:putra_jaya_billiard/widgets/custom_app_bar.dart';
-import 'package:putra_jaya_billiard/pages/pos/pos_page.dart';
+import 'package:window_manager/window_manager.dart';
 
 class MainLayout extends StatefulWidget {
   final UserModel user;
@@ -71,8 +70,9 @@ class _MainLayoutState extends State<MainLayout> {
     }
   }
 
-  void _handleSettingsChanged() {
-    print("Settings changed, potentially reload rates here.");
+  void _toggleNativeFullscreen() async {
+    bool isFull = await windowManager.isFullScreen();
+    windowManager.setFullScreen(!isFull);
   }
 
   @override
@@ -83,6 +83,8 @@ class _MainLayoutState extends State<MainLayout> {
         user: widget.user,
         onSettingsChanged: () {},
         onGoHome: _switchToDashboard,
+        onGoToPOS: () => _onPageSelected(6),
+        onToggleFullscreen: _toggleNativeFullscreen,
       ),
       drawer: AppDrawer(user: widget.user, onPageSelected: _onPageSelected),
       body: Container(
@@ -95,7 +97,17 @@ class _MainLayoutState extends State<MainLayout> {
         ),
         child: IndexedStack(
           index: _selectedIndex,
-          children: _pages,
+          children: List.generate(
+            12,
+            (index) =>
+                _pageMap[index] ??
+                const Center(
+                  child: Text(
+                    "Halaman tidak tersedia untuk role Anda.",
+                    style: TextStyle(color: Colors.white54),
+                  ),
+                ),
+          ),
         ),
       ),
     );
