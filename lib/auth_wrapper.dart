@@ -3,7 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:putra_jaya_billiard/models/user_model.dart';
-import 'package:putra_jaya_billiard/pages/home_page.dart';
+import 'package:putra_jaya_billiard/pages/billing/home_page.dart';
 import 'package:putra_jaya_billiard/pages/login_page.dart';
 import 'package:putra_jaya_billiard/services/auth_service.dart';
 

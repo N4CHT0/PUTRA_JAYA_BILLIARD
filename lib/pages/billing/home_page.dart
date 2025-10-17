@@ -1,4 +1,3 @@
-// lib/pages/home_page.dart
 import 'dart:async';
 import 'dart:ui';
 import 'package:flutter/material.dart';
@@ -6,10 +5,10 @@ import 'package:intl/intl.dart' as intl;
 import 'package:putra_jaya_billiard/models/billing_transaction.dart';
 import 'package:putra_jaya_billiard/models/relay_data.dart';
 import 'package:putra_jaya_billiard/models/user_model.dart';
-import 'package:putra_jaya_billiard/pages/accounts_page.dart'; // Import halaman akun
-import 'package:putra_jaya_billiard/pages/reports_page.dart';
-import 'package:putra_jaya_billiard/pages/settings_page.dart';
-import 'package:putra_jaya_billiard/pages/transactions_page.dart';
+import 'package:putra_jaya_billiard/pages/account/accounts_page.dart';
+import 'package:putra_jaya_billiard/pages/Reports/reports_page.dart';
+import 'package:putra_jaya_billiard/pages/Setting/settings_page.dart';
+import 'package:putra_jaya_billiard/pages/transaction/transactions_page.dart';
 import 'package:putra_jaya_billiard/services/arduino_service.dart';
 import 'package:putra_jaya_billiard/services/auth_service.dart';
 import 'package:putra_jaya_billiard/services/firebase_service.dart';
