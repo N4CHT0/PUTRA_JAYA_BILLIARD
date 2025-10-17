@@ -1,12 +1,11 @@
-// lib/pages/reports_page.dart
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart' as intl;
+import 'package:putra_jaya_billiard/services/firebase_service.dart';
 import 'package:putra_jaya_billiard/utils/pdf_generator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class ReportsPage extends StatefulWidget {
-  // --- PERUBAHAN 1: Menambahkan parameter untuk menerima userRole ---
   final String userRole;
   const ReportsPage({super.key, required this.userRole});
 
@@ -19,13 +18,12 @@ class _ReportsPageState extends State<ReportsPage>
   late TabController _tabController;
   DateTime _selectedDate = DateTime.now();
   int _shift1StartHour = 8;
+  final FirebaseService _firebaseService = FirebaseService();
 
   @override
   void initState() {
     super.initState();
-    // --- PERUBAHAN 2: Jumlah tab ditentukan oleh role ---
-    final tabLength =
-        widget.userRole == 'admin' ? 4 : 2; // Admin: 4 tab, Pegawai: 2 tab
+    final tabLength = widget.userRole == 'admin' ? 4 : 2;
     _tabController = TabController(length: tabLength, vsync: this);
     _loadShiftSettings();
   }
@@ -67,7 +65,6 @@ class _ReportsPageState extends State<ReportsPage>
 
   @override
   Widget build(BuildContext context) {
-    // --- PERUBAHAN 3: Daftar tab dan view dibuat dinamis berdasarkan role ---
     final List<Widget> tabs = widget.userRole == 'admin'
         ? const [
             Tab(text: 'Shift'),
@@ -92,39 +89,30 @@ class _ReportsPageState extends State<ReportsPage>
             _buildReportView(ReportType.daily),
           ];
 
-    return Container(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          colors: [Color(0xFF1a1a2e), Color(0xFF16213e)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
+    return Scaffold(
+      backgroundColor: Colors.transparent,
+      appBar: AppBar(
+        title: const Text('Laporan Pendapatan'),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.calendar_today),
+            tooltip: 'Pilih Tanggal',
+            onPressed: () => _selectDate(context),
+          ),
+        ],
+        bottom: TabBar(
+          controller: _tabController,
+          indicatorColor: Colors.cyanAccent,
+          labelColor: Colors.white,
+          unselectedLabelColor: Colors.white70,
+          tabs: tabs,
         ),
       ),
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        appBar: AppBar(
-          title: const Text('Laporan Pendapatan'),
-          backgroundColor: Colors.transparent,
-          elevation: 0,
-          actions: [
-            IconButton(
-              icon: const Icon(Icons.calendar_today),
-              tooltip: 'Pilih Tanggal',
-              onPressed: () => _selectDate(context),
-            ),
-          ],
-          bottom: TabBar(
-            controller: _tabController,
-            indicatorColor: Colors.cyanAccent,
-            labelColor: Colors.white,
-            unselectedLabelColor: Colors.white70,
-            tabs: tabs, // Menggunakan daftar tab dinamis
-          ),
-        ),
-        body: TabBarView(
-          controller: _tabController,
-          children: tabViews, // Menggunakan daftar view dinamis
-        ),
+      body: TabBarView(
+        controller: _tabController,
+        children: tabViews,
       ),
     );
   }
@@ -179,33 +167,23 @@ class _ReportsPageState extends State<ReportsPage>
     return ListView(
       padding: const EdgeInsets.all(8.0),
       children: [
-        _buildGeneralReportBody(
-          shift1Start,
-          shift1End,
-          'Laporan Shift 1 (${intl.DateFormat('HH:mm').format(shift1Start)} - ${intl.DateFormat('HH:mm').format(shift1End)})',
-        ),
+        _buildGeneralReportBody(shift1Start, shift1End,
+            'Laporan Shift 1 (${intl.DateFormat('HH:mm').format(shift1Start)} - ${intl.DateFormat('HH:mm').format(shift1End)})'),
         const SizedBox(height: 16),
-        _buildGeneralReportBody(
-          shift2Start,
-          shift2End,
-          'Laporan Shift 2 (${intl.DateFormat('HH:mm').format(shift2Start)} - ${intl.DateFormat('HH:mm').format(shift2End)})',
-        ),
+        _buildGeneralReportBody(shift2Start, shift2End,
+            'Laporan Shift 2 (${intl.DateFormat('HH:mm').format(shift2Start)} - ${intl.DateFormat('HH:mm').format(shift2End)})'),
       ],
     );
   }
 
   Widget _buildGeneralReportBody(DateTime start, DateTime end, String title) {
     return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('transactions')
-          .where('startTime', isGreaterThanOrEqualTo: start)
-          .where('startTime', isLessThan: end)
-          .orderBy('startTime', descending: true)
-          .snapshots(),
+      stream: _firebaseService.getReportStream(start, end),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
         }
+        // --- PERBAIKAN: Melengkapi widget 'tidak ada transaksi' ---
         if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
           return Center(
             child: Container(
@@ -225,14 +203,16 @@ class _ReportsPageState extends State<ReportsPage>
         final docs = snapshot.data!.docs;
         final transactions =
             docs.map((doc) => doc.data() as Map<String, dynamic>).toList();
+
         final totalRevenue = transactions.fold<double>(
-          0,
-          (sum, item) => sum + (item['totalCost'] ?? 0.0),
-        );
+            0, (sum, item) => sum + (item['totalAmount'] ?? 0.0));
+
         final formatter = intl.NumberFormat.currency(
             locale: 'id_ID', symbol: 'Rp ', decimalDigits: 0);
+
         return Column(
           children: [
+            // --- PERBAIKAN: Melengkapi widget header laporan ---
             Container(
               margin:
                   const EdgeInsets.symmetric(horizontal: 8.0, vertical: 8.0),
@@ -268,48 +248,11 @@ class _ReportsPageState extends State<ReportsPage>
                 itemCount: transactions.length,
                 itemBuilder: (context, index) {
                   final trx = transactions[index];
-                  final startTime = (trx['startTime'] as Timestamp).toDate();
-                  final duration =
-                      Duration(seconds: trx['durationInSeconds'] ?? 0);
-                  final durationString =
-                      "${duration.inHours}j ${duration.inMinutes.remainder(60)}m";
-                  return Container(
-                    margin: const EdgeInsets.only(bottom: 8.0),
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 12),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.15),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('Meja ${trx['tableId']}',
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.bold, fontSize: 16)),
-                            const SizedBox(height: 4),
-                            Text(
-                              '${intl.DateFormat('dd MMM, HH:mm').format(startTime)} • $durationString',
-                              style: TextStyle(
-                                  color: Colors.grey[400], fontSize: 12),
-                            ),
-                          ],
-                        ),
-                        Text(
-                          formatter.format(trx['totalCost']),
-                          style: const TextStyle(
-                              fontSize: 14, color: Colors.white),
-                        ),
-                      ],
-                    ),
-                  );
+                  return _buildTransactionDetailCard(trx, formatter);
                 },
               ),
             ),
-            // --- PERUBAHAN 4: Tombol cetak hanya muncul untuk admin ---
+            // --- PERBAIKAN: Melengkapi widget tombol cetak ---
             if (widget.userRole == 'admin')
               Padding(
                 padding: const EdgeInsets.all(16.0),
@@ -330,6 +273,75 @@ class _ReportsPageState extends State<ReportsPage>
           ],
         );
       },
+    );
+  }
+
+  Widget _buildTransactionDetailCard(
+      Map<String, dynamic> trx, intl.NumberFormat formatter) {
+    final createdAt = (trx['createdAt'] as Timestamp).toDate();
+    final type = trx['type'] ?? 'unknown';
+
+    String title;
+    String subtitle;
+    IconData icon;
+    Color iconColor;
+
+    if (type == 'billiard') {
+      title = 'Meja ${trx['tableId']}';
+      final duration = Duration(seconds: trx['durationInSeconds'] ?? 0);
+      final durationString =
+          "${duration.inHours}j ${duration.inMinutes.remainder(60)}m";
+      subtitle =
+          '${intl.DateFormat('dd MMM, HH:mm').format(createdAt)} • $durationString';
+      icon = Icons.pool;
+      iconColor = Colors.cyanAccent;
+    } else if (type == 'pos') {
+      title = 'Transaksi POS';
+      final cashierName = trx['cashierName'] ?? 'N/A';
+      subtitle =
+          '${intl.DateFormat('dd MMM, HH:mm').format(createdAt)} • oleh $cashierName';
+      icon = Icons.point_of_sale;
+      iconColor = Colors.amberAccent;
+    } else {
+      title = 'Transaksi Tidak Dikenal';
+      subtitle = intl.DateFormat('dd MMM, HH:mm').format(createdAt);
+      icon = Icons.help_outline;
+      iconColor = Colors.grey;
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8.0),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.15),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: iconColor, size: 28),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title,
+                    style: const TextStyle(
+                        fontWeight: FontWeight.bold, fontSize: 16)),
+                const SizedBox(height: 4),
+                Text(
+                  subtitle,
+                  style: TextStyle(color: Colors.grey[400], fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+          Text(
+            formatter.format(trx['totalAmount']),
+            style: const TextStyle(
+                fontSize: 14, color: Colors.white, fontWeight: FontWeight.bold),
+          ),
+        ],
+      ),
     );
   }
 }

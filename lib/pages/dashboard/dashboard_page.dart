@@ -5,12 +5,7 @@ import 'package:intl/intl.dart' as intl;
 import 'package:putra_jaya_billiard/models/billing_transaction.dart';
 import 'package:putra_jaya_billiard/models/relay_data.dart';
 import 'package:putra_jaya_billiard/models/user_model.dart';
-import 'package:putra_jaya_billiard/pages/account/accounts_page.dart';
-import 'package:putra_jaya_billiard/pages/Reports/reports_page.dart';
-import 'package:putra_jaya_billiard/pages/Setting/settings_page.dart';
-import 'package:putra_jaya_billiard/pages/transaction/transactions_page.dart';
 import 'package:putra_jaya_billiard/services/arduino_service.dart';
-import 'package:putra_jaya_billiard/services/auth_service.dart';
 import 'package:putra_jaya_billiard/services/firebase_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sliding_up_panel/sliding_up_panel.dart';
@@ -18,19 +13,19 @@ import 'package:sliding_up_panel/sliding_up_panel.dart';
 // --- Constants ---
 const int numRelays = 32;
 
-class HomePage extends StatefulWidget {
+class DashboardPage extends StatefulWidget {
   final UserModel user;
 
-  const HomePage({
+  const DashboardPage({
     super.key,
     required this.user,
   });
 
   @override
-  State<HomePage> createState() => _HomePageState();
+  State<DashboardPage> createState() => _DashboardPageState();
 }
 
-class _HomePageState extends State<HomePage> {
+class _DashboardPageState extends State<DashboardPage> {
   static const String _ratePerHourKey = 'ratePerHour';
   static const String _ratePerMinuteKey = 'ratePerMinute';
   final ArduinoService _arduinoService = ArduinoService();
@@ -154,7 +149,9 @@ class _HomePageState extends State<HomePage> {
     );
 
     try {
-      await _firebaseService.saveTransaction(transaction);
+      // --- PENYESUAIAN DI SINI ---
+      // Ganti saveTransaction menjadi saveBillingTransaction dan tambahkan user
+      await _firebaseService.saveBillingTransaction(transaction, widget.user);
       _addLog('Transaksi Meja $mejaId berhasil disimpan ke Firebase.');
     } catch (e) {
       _addLog('Error menyimpan ke Firebase: $e');
@@ -404,134 +401,38 @@ class _HomePageState extends State<HomePage> {
     final screenHeight = MediaQuery.of(context).size.height;
     final double panelMinHeight = screenHeight * 0.1;
 
-    return Scaffold(
-      backgroundColor: Colors.transparent,
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Color(0xFF1a1a2e), Color(0xFF16213e)],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-        ),
-        child: SlidingUpPanel(
-          panel: _buildLogPanel(),
-          collapsed: _buildCollapsedPanel(),
-          minHeight: panelMinHeight,
-          maxHeight: screenHeight * 0.6,
-          color: Colors.transparent,
-          body: SafeArea(
-            bottom: false,
-            child: Column(
-              children: [
-                _buildCustomAppBar(),
-                _buildConnectionStatusPanel(),
-                Expanded(
-                  child: GridView.builder(
-                    padding:
-                        EdgeInsets.fromLTRB(16, 16, 16, panelMinHeight + 16),
-                    gridDelegate:
-                        const SliverGridDelegateWithMaxCrossAxisExtent(
-                      maxCrossAxisExtent: 380,
-                      childAspectRatio: 1.7,
-                      crossAxisSpacing: 16,
-                      mainAxisSpacing: 16,
-                    ),
-                    itemCount: numRelays,
-                    itemBuilder: (context, index) {
-                      final mejaId = index + 1;
-                      final relay = _relayStates[mejaId]!;
-                      final bool isSessionActive =
-                          _activeSessions.containsKey(mejaId);
-                      return _buildGlassCard(mejaId, relay, isSessionActive);
-                    },
-                  ),
+    return SlidingUpPanel(
+      panel: _buildLogPanel(),
+      collapsed: _buildCollapsedPanel(),
+      minHeight: panelMinHeight,
+      maxHeight: screenHeight * 0.6,
+      color: Colors.transparent,
+      body: SafeArea(
+        bottom: false,
+        child: Column(
+          children: [
+            _buildConnectionStatusPanel(),
+            Expanded(
+              child: GridView.builder(
+                padding: EdgeInsets.fromLTRB(16, 16, 16, panelMinHeight + 16),
+                gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                  maxCrossAxisExtent: 380,
+                  childAspectRatio: 1.7,
+                  crossAxisSpacing: 16,
+                  mainAxisSpacing: 16,
                 ),
-              ],
+                itemCount: numRelays,
+                itemBuilder: (context, index) {
+                  final mejaId = index + 1;
+                  final relay = _relayStates[mejaId]!;
+                  final bool isSessionActive =
+                      _activeSessions.containsKey(mejaId);
+                  return _buildGlassCard(mejaId, relay, isSessionActive);
+                },
+              ),
             ),
-          ),
+          ],
         ),
-      ),
-    );
-  }
-
-  Widget _buildCustomAppBar() {
-    final authService = AuthService();
-    final userRole = widget.user.role;
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // --- PERUBAHAN DI SINI ---
-              // Tampilkan nama pengguna yang login
-              Text(
-                widget.user.nama,
-                style:
-                    const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                '${widget.user.email} (${userRole.toUpperCase()})',
-                style: const TextStyle(fontSize: 12, color: Colors.white70),
-              ),
-            ],
-          ),
-          Row(
-            children: [
-              if (userRole == 'admin') ...[
-                IconButton(
-                  icon: const Icon(Icons.manage_accounts),
-                  tooltip: 'Manajemen Akun',
-                  onPressed: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => AccountsPage(admin: widget.user),
-                    ),
-                  ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.history),
-                  tooltip: 'Riwayat Transaksi',
-                  onPressed: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                          builder: (context) => const TransactionsPage())),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.settings),
-                  tooltip: 'Pengaturan',
-                  onPressed: () async {
-                    final settingsChanged = await Navigator.push<bool>(
-                        context,
-                        MaterialPageRoute(
-                            builder: (context) => const SettingsPage()));
-                    if (settingsChanged == true) _loadRates();
-                  },
-                ),
-              ],
-              IconButton(
-                icon: const Icon(Icons.bar_chart),
-                tooltip: 'Laporan Pendapatan',
-                onPressed: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => ReportsPage(userRole: userRole),
-                  ),
-                ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.logout),
-                tooltip: 'Logout',
-                onPressed: () => authService.signOut(),
-              ),
-            ],
-          ),
-        ],
       ),
     );
   }
@@ -540,7 +441,7 @@ class _HomePageState extends State<HomePage> {
     final isConnected = _arduinoService.isConnected;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      margin: const EdgeInsets.symmetric(horizontal: 16),
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
         color: const Color.fromARGB(51, 0, 0, 0),
         borderRadius: BorderRadius.circular(12),

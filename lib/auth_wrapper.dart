@@ -3,8 +3,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:putra_jaya_billiard/models/user_model.dart';
-import 'package:putra_jaya_billiard/pages/billing/home_page.dart';
+import 'package:putra_jaya_billiard/pages/dashboard/dashboard_page.dart';
 import 'package:putra_jaya_billiard/pages/login_page.dart';
+import 'package:putra_jaya_billiard/pages/main_layouts.dart';
 import 'package:putra_jaya_billiard/services/auth_service.dart';
 
 class AuthWrapper extends StatelessWidget {
@@ -81,7 +82,7 @@ class RoleDispatcher extends StatelessWidget {
             nama: data['nama'] ?? 'Tanpa Nama',
           );
 
-          return HomePage(user: userModel);
+          return MainLayout(user: userModel);
         }
 
         print("RoleDispatcher: Dokumen TIDAK DITEMUKAN. Memaksa logout.");
