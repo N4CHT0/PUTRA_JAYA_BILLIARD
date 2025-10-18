@@ -472,7 +472,7 @@ class _DashboardPageState extends State<DashboardPage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Putra Jaya Billiard - Dashboard'),
+        title: const Text('Kontrol Meja Billiard'),
         backgroundColor: Colors.transparent,
         elevation: 0,
         actions: [

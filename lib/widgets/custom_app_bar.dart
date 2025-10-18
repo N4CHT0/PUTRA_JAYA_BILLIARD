@@ -1,5 +1,3 @@
-// lib/widgets/custom_app_bar.dart
-
 import 'package:flutter/material.dart';
 import 'package:putra_jaya_billiard/models/user_model.dart';
 import 'package:putra_jaya_billiard/services/auth_service.dart';
@@ -49,19 +47,8 @@ class CustomAppBar extends StatelessWidget implements PreferredSizeWidget {
         ),
         IconButton(
           icon: const Icon(Icons.casino),
-          tooltip: 'billiard',
+          tooltip: 'Kotrol Meja Billiard',
           onPressed: onGoHome,
-        ),
-        // --- TOMBOL BARU ---
-        IconButton(
-          icon: const Icon(Icons.key),
-          tooltip: 'Ganti Password',
-          onPressed: () {
-            showDialog(
-              context: context,
-              builder: (context) => const ChangePasswordDialog(),
-            );
-          },
         ),
         IconButton(
           icon: const Icon(Icons.logout),

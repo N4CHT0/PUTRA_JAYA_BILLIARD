@@ -107,7 +107,7 @@ class _LoginPageState extends State<LoginPage> {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      'Login ke sistem Putra Jaya Billiard',
+                      'Login',
                       textAlign: TextAlign.center,
                       style: TextStyle(fontSize: 16, color: Colors.grey[400]),
                     ),
