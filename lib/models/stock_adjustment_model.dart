@@ -4,8 +4,8 @@ class StockAdjustment {
   final String productName;
   final int previousStock;
   final int newStock;
-  final int difference; // Selisih (bisa positif atau negatif)
-  final String reason; // Alasan penyesuaian (e.g., Stok Opname, Rusak)
+  final int difference;
+  final String reason;
   final String userId;
   final String userName;
   final DateTime adjustmentDate;
