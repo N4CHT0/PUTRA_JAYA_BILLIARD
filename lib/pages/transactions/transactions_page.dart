@@ -1,21 +1,27 @@
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart' as intl;
-import 'package:putra_jaya_billiard/services/firebase_service.dart';
+import 'package:putra_jaya_billiard/services/local_database_service.dart';
+import 'package:putra_jaya_billiard/models/local_transaction.dart';
 import 'package:putra_jaya_billiard/widgets/transactions_detail_dialog.dart';
 
-class TransactionsPage extends StatelessWidget {
+class TransactionsPage extends StatefulWidget {
   const TransactionsPage({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    final FirebaseService firebaseService = FirebaseService();
-    final formatter = intl.NumberFormat.currency(
-      locale: 'id_ID',
-      symbol: 'Rp ',
-      decimalDigits: 0,
-    );
+  State<TransactionsPage> createState() => _TransactionsPageState();
+}
 
+class _TransactionsPageState extends State<TransactionsPage> {
+  final LocalDatabaseService _localDbService = LocalDatabaseService();
+  final formatter = intl.NumberFormat.currency(
+    locale: 'id_ID',
+    symbol: 'Rp ',
+    decimalDigits: 0,
+  );
+
+  @override
+  Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.transparent,
       appBar: AppBar(
@@ -23,13 +29,13 @@ class TransactionsPage extends StatelessWidget {
         backgroundColor: Colors.transparent,
         elevation: 0,
       ),
-      body: StreamBuilder<QuerySnapshot>(
-        stream: firebaseService.getFinancialTransactionsStream(),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+      body: ValueListenableBuilder<Box<LocalTransaction>>(
+        valueListenable: _localDbService.getTransactionListenable(),
+        builder: (context, box, _) {
+          final transactions = box.values.toList().cast<LocalTransaction>();
+          transactions.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+
+          if (transactions.isEmpty) {
             return Center(
               child: Text(
                 'Belum ada transaksi.',
@@ -38,26 +44,22 @@ class TransactionsPage extends StatelessWidget {
             );
           }
 
-          final transactions = snapshot.data!.docs;
-
           return ListView.builder(
             padding: const EdgeInsets.all(12.0),
             itemCount: transactions.length,
             itemBuilder: (context, index) {
-              final doc = transactions[index];
-              final data = doc.data() as Map<String, dynamic>;
-              // -- DIBUNGKUS DENGAN INKWELL AGAR BISA DI-KLIK --
+              final trx = transactions[index];
+              final trxKey = trx.key;
+
               return InkWell(
                 onTap: () {
                   showDialog(
                     context: context,
-                    builder: (_) =>
-                        TransactionDetailDialog(transactionData: data),
+                    builder: (_) => TransactionDetailDialog(transaction: trx),
                   );
                 },
                 borderRadius: BorderRadius.circular(16),
-                child: _buildTransactionCard(
-                    context, doc, data, formatter, firebaseService),
+                child: _buildTransactionCard(context, trx, trxKey, formatter),
               );
             },
           );
@@ -67,15 +69,15 @@ class TransactionsPage extends StatelessWidget {
   }
 
   Widget _buildTransactionCard(
-      BuildContext context,
-      DocumentSnapshot doc,
-      Map<String, dynamic> data,
-      intl.NumberFormat formatter,
-      FirebaseService firebaseService) {
-    final isIncome = data['flow'] == 'income';
-    final type = data['type'] ?? 'unknown';
-    final createdAt = (data['createdAt'] as Timestamp).toDate();
-    final totalAmount = data['totalAmount'] as double;
+    BuildContext context,
+    LocalTransaction trx,
+    dynamic trxKey, // Key Hive bisa int atau String
+    intl.NumberFormat formatter,
+  ) {
+    final isIncome = trx.flow == 'income';
+    final type = trx.type;
+    final createdAt = trx.createdAt;
+    final totalAmount = trx.totalAmount;
 
     String title;
     String subtitle;
@@ -83,25 +85,25 @@ class TransactionsPage extends StatelessWidget {
 
     switch (type) {
       case 'billiard':
-        title = 'Billing Meja ${data['tableId']}';
-        final duration = Duration(seconds: data['durationInSeconds'] ?? 0);
+        title = 'Billing Meja ${trx.tableId}';
+        final duration = Duration(seconds: trx.durationInSeconds ?? 0);
         subtitle = "${duration.inHours}j ${duration.inMinutes.remainder(60)}m";
         icon = Icons.pool;
         break;
       case 'pos':
         title = 'Penjualan POS';
-        final items = data['items'] as List<dynamic>?;
+        final items = trx.items;
         final totalItems = items?.fold<int>(
                 0,
                 (sum, item) =>
                     sum + ((item['quantity'] ?? 0) as num).toInt()) ??
             0;
-        subtitle = '$totalItems item oleh ${data['cashierName']}';
+        subtitle = '$totalItems item oleh ${trx.cashierName}';
         icon = Icons.point_of_sale;
         break;
       case 'purchase':
         title = 'Pembelian Stok';
-        subtitle = 'dari ${data['supplierName']}';
+        subtitle = 'dari ${trx.supplierName}';
         icon = Icons.shopping_cart;
         break;
       default:
@@ -142,10 +144,25 @@ class TransactionsPage extends StatelessWidget {
             ),
             IconButton(
               icon: const Icon(Icons.delete, color: Colors.grey),
+              tooltip: 'Hapus Transaksi',
               onPressed: () async {
-                final confirm = await _showDeleteConfirmationDialog(context);
+                final confirm = await _showDeleteConfirmationDialog(
+                    context, trx.type, totalAmount);
                 if (confirm == true) {
-                  await firebaseService.deleteFinancialTransaction(doc.id);
+                  try {
+                    await _localDbService.deleteTransaction(trxKey);
+                    if (!mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                      content: Text('Transaksi berhasil dihapus (Lokal).'),
+                      backgroundColor: Colors.green,
+                    ));
+                  } catch (e) {
+                    if (!mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                      content: Text('Gagal menghapus: $e'),
+                      backgroundColor: Colors.red,
+                    ));
+                  }
                 }
               },
             ),
@@ -155,14 +172,16 @@ class TransactionsPage extends StatelessWidget {
     );
   }
 
-  Future<bool?> _showDeleteConfirmationDialog(BuildContext context) {
+  Future<bool?> _showDeleteConfirmationDialog(
+      BuildContext context, String type, double amount) {
     return showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF1E1E1E),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Text('Hapus Transaksi?'),
-        content: const Text('Aksi ini tidak dapat dibatalkan.'),
+        content: Text(
+            'Anda yakin ingin menghapus transaksi $type senilai ${formatter.format(amount)}? Aksi ini tidak dapat dibatalkan.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),

@@ -2,17 +2,21 @@
 
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:hive_flutter/hive_flutter.dart'; // Import Hive
 import 'package:intl/intl.dart' as intl;
-import 'package:putra_jaya_billiard/models/billing_transaction.dart';
-import 'package:putra_jaya_billiard/models/member_model.dart';
+import 'package:putra_jaya_billiard/models/local_member.dart';
+import 'package:putra_jaya_billiard/models/local_transaction.dart';
+// Import model lain yang masih relevan
 import 'package:putra_jaya_billiard/models/relay_data.dart';
-import 'package:putra_jaya_billiard/models/user_model.dart';
+import 'package:putra_jaya_billiard/models/user_model.dart'; // Dari Firebase Auth
+// Import service
 import 'package:putra_jaya_billiard/pages/connection/connection_page.dart';
 import 'package:putra_jaya_billiard/services/arduino_service.dart';
-import 'package:putra_jaya_billiard/services/firebase_service.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:putra_jaya_billiard/services/billing_services.dart';
+// Import service LOKAL
+import 'package:putra_jaya_billiard/services/local_database_service.dart';
+// Import widget
 import 'package:sliding_up_panel/sliding_up_panel.dart';
-
 import 'widgets/billiard_table_card.dart';
 import 'widgets/log_panel.dart';
 
@@ -21,25 +25,30 @@ const int numRelays = 32;
 class DashboardPage extends StatefulWidget {
   final UserModel user;
   final ArduinoService arduinoService;
+  // Hapus kodeOrganisasi
+  // final String kodeOrganisasi;
 
   const DashboardPage({
     super.key,
     required this.user,
     required this.arduinoService,
+    // required this.kodeOrganisasi, // Hapus
   });
 
   @override
-  State<DashboardPage> createState() => _DashboardPageState();
+  State<DashboardPage> createState() => DashboardPageState();
 }
 
-class _DashboardPageState extends State<DashboardPage> {
-  final FirebaseService _firebaseService = FirebaseService();
+// Nama State class dibuat publik
+class DashboardPageState extends State<DashboardPage> {
+  // Gunakan service LOKAL
+  final LocalDatabaseService _localDbService = LocalDatabaseService();
+  final BillingService _billingService =
+      BillingService(); // Masih dipakai untuk hitung tarif
   final Map<int, RelayData> _relayStates = {};
   final Map<int, DateTime> _activeSessions = {};
   Timer? _logicTimer;
   String _logMessages = '';
-  double _ratePerHour = 50000.0;
-  double _ratePerMinute = 0.0;
   final ScrollController _logScrollController = ScrollController();
 
   @override
@@ -47,7 +56,7 @@ class _DashboardPageState extends State<DashboardPage> {
     super.initState();
     _initRelayStates();
     _startLogicTimer();
-    _loadRates();
+    _loadRates(); // Memuat tarif dari SharedPreferences via BillingService
     widget.arduinoService.onDataReceived = (data) => _addLog('Arduino: $data');
     widget.arduinoService.onConnectionChanged = () {
       if (mounted) setState(() {});
@@ -62,20 +71,24 @@ class _DashboardPageState extends State<DashboardPage> {
     super.dispose();
   }
 
+  // Fungsi ini dipanggil oleh MainLayout setelah settings disimpan
+  void loadRatesAfterSave() {
+    _addLog('PENGATURAN DIPERBARUI. Memuat ulang tarif...');
+    _loadRates();
+  }
+
   void _initRelayStates() {
     for (int i = 1; i <= numRelays; i++) {
       _relayStates[i] = RelayData(id: i);
     }
   }
 
+  // Load tarif tetap dari SharedPreferences via BillingService
   Future<void> _loadRates() async {
-    final prefs = await SharedPreferences.getInstance();
+    await _billingService.loadRates();
     if (!mounted) return;
-    setState(() {
-      _ratePerHour = prefs.getDouble('ratePerHour') ?? 50000.0;
-      _ratePerMinute = prefs.getDouble('ratePerMinute') ?? 0;
-    });
-    _addLog('Harga dimuat: Rp$_ratePerHour/jam, Rp$_ratePerMinute/menit');
+    setState(() {});
+    _addLog('Tarif harga berhasil dimuat.');
   }
 
   void _startLogicTimer() {
@@ -130,13 +143,17 @@ class _DashboardPageState extends State<DashboardPage> {
     _addLog('Sesi billing Meja $mejaId dimulai.');
   }
 
+  // --- Fungsi Finalize Bill Diubah Total ---
   Future<void> _finalizeAndSaveBill(int mejaId,
-      {Member? member,
+      {LocalMember? member, // Terima LocalMember
       required double subtotal,
       required double discount,
       required double finalTotal}) async {
     final startTime = _activeSessions[mejaId];
     if (startTime == null) return;
+
+    final endTime = DateTime.now();
+    final durationSeconds = endTime.difference(startTime).inSeconds;
 
     _setRelayStateToOff(mejaId);
     if (mounted) {
@@ -145,30 +162,38 @@ class _DashboardPageState extends State<DashboardPage> {
 
     _addLog('Sesi Meja $mejaId selesai. Total: ${_formatCurrency(finalTotal)}');
 
-    final transaction = BillingTransaction(
+    // Buat objek transaksi LOKAL
+    final localTransaction = LocalTransaction(
+      flow: 'income',
+      type: 'billiard',
+      totalAmount: finalTotal,
+      createdAt: startTime, // Gunakan startTime sebagai waktu transaksi
+      cashierId: widget.user.uid,
+      cashierName: widget.user.nama,
       tableId: mejaId,
       startTime: startTime,
-      endTime: DateTime.now(),
-      durationInSeconds: DateTime.now().difference(startTime).inSeconds,
-      totalCost: subtotal,
+      endTime: endTime,
+      durationInSeconds: durationSeconds,
+      subtotal: subtotal,
+      discount: discount,
+      memberId: member?.key.toString(), // Simpan key Hive sbg ID
+      memberName: member?.name,
     );
 
+    if (!mounted) return;
+
     try {
-      await _firebaseService.saveBillingTransaction(
-        transaction,
-        widget.user,
-        member: member,
-        subtotal: subtotal,
-        discount: discount,
-        finalTotal: finalTotal,
-      );
-      _addLog('Transaksi Meja $mejaId berhasil disimpan ke Firebase.');
-    } catch (e) {
-      _addLog('ERROR: Gagal menyimpan transaksi Meja $mejaId ke Firebase: $e');
+      // Simpan transaksi ke Hive
+      await _localDbService.addTransaction(localTransaction);
+      _addLog('Transaksi Meja $mejaId berhasil disimpan (Lokal).');
+    } catch (e, s) {
+      print('Error saving local billing transaction: $e');
+      print(s);
+      _addLog('ERROR: Gagal menyimpan transaksi Meja $mejaId (Lokal): $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Gagal menyimpan transaksi ke server.'),
+            content: Text('Gagal menyimpan transaksi ke database lokal.'),
             backgroundColor: Colors.red,
           ),
         );
@@ -177,8 +202,9 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   Future<void> _sendCommand(int mejaId, String action) async {
+    if (!mounted) return;
     final success = await widget.arduinoService.sendCommand(mejaId, action);
-    if (!success) {
+    if (!success && mounted) {
       _addLog('Error: Gagal mengirim perintah ke Arduino (tidak terkoneksi).');
     }
   }
@@ -229,20 +255,25 @@ class _DashboardPageState extends State<DashboardPage> {
     _setRelayStateToOff(mejaId);
   }
 
+  // --- Dialog Konfirmasi (Gunakan LocalMember) ---
   Future<void> _showConfirmationDialog(int mejaId) async {
     final startTime = _activeSessions[mejaId];
     if (startTime == null) return;
 
-    Member? selectedMemberInDialog;
+    LocalMember? selectedMemberInDialog; // Gunakan LocalMember
 
-    return showDialog<void>(
+    if (!mounted) return;
+
+    await showDialog<void>(
       context: context,
       barrierDismissible: false,
-      builder: (BuildContext context) {
+      builder: (BuildContext dialogContext) {
         return StatefulBuilder(
-          builder: (context, setStateInDialog) {
+          builder: (dialogContext, setStateInDialog) {
             final duration = DateTime.now().difference(startTime);
-            final subtotal = _calculateCost(duration);
+            final subtotal =
+                _billingService.calculateBilliardFee(duration, date: startTime);
+
             final discountPercentage =
                 selectedMemberInDialog?.discountPercentage ?? 0;
             final discountAmount = subtotal * (discountPercentage / 100);
@@ -266,32 +297,42 @@ class _DashboardPageState extends State<DashboardPage> {
                     const Divider(height: 12, color: Colors.white24),
                     _buildPriceRow('Total Tagihan:', finalCost, isTotal: true),
                     const Divider(height: 24, color: Colors.white24),
-                    StreamBuilder<List<Member>>(
-                      stream: _firebaseService.getMembersStream(),
-                      builder: (context, snapshot) {
-                        if (!snapshot.hasData) {
-                          return const Center(child: Text("Memuat member..."));
-                        }
-                        final members = snapshot.data!;
-                        List<DropdownMenuItem<Member?>> items = [
-                          const DropdownMenuItem<Member?>(
+                    // Gunakan ValueListenableBuilder untuk member dari Hive
+                    ValueListenableBuilder<Box<LocalMember>>(
+                      valueListenable: _localDbService.getMemberListenable(),
+                      builder: (context, box, _) {
+                        final members = box.values.toList().cast<LocalMember>();
+                        List<DropdownMenuItem<LocalMember?>> items = [
+                          const DropdownMenuItem<LocalMember?>(
                             value: null,
                             child: Text('Pelanggan Umum'),
                           ),
                           ...members.where((m) => m.isActive).map((member) {
-                            return DropdownMenuItem<Member?>(
+                            // Filter aktif
+                            return DropdownMenuItem<LocalMember?>(
                               value: member,
                               child: Text(member.name),
                             );
                           }).toList(),
                         ];
-                        return DropdownButton<Member?>(
+
+                        // Validasi jika _selectedMember masih ada di daftar
+                        final currentSelectionExists = members
+                            .any((m) => m.key == selectedMemberInDialog?.key);
+                        if (!currentSelectionExists) {
+                          selectedMemberInDialog =
+                              null; // Reset jika sudah tidak ada
+                        }
+
+                        return DropdownButton<LocalMember?>(
                           value: selectedMemberInDialog,
                           hint: const Text('Pilih Member (Opsional)'),
                           isExpanded: true,
+                          underline: const SizedBox.shrink(),
+                          dropdownColor: const Color(0xFF2c2c2c),
                           items: items,
-                          onChanged: (Member? newValue) {
-                            setStateInDialog(
+                          onChanged: (LocalMember? newValue) {
+                            setStateInDialog(// Gunakan setStateInDialog
                                 () => selectedMemberInDialog = newValue);
                           },
                         );
@@ -303,12 +344,13 @@ class _DashboardPageState extends State<DashboardPage> {
               actions: <Widget>[
                 TextButton(
                     child: const Text('Batal'),
-                    onPressed: () => Navigator.of(context).pop()),
+                    onPressed: () => Navigator.of(dialogContext).pop()),
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(backgroundColor: Colors.teal),
                   child: const Text('Konfirmasi & Bayar'),
                   onPressed: () {
-                    Navigator.of(context).pop();
+                    Navigator.of(dialogContext).pop();
+                    // Kirim LocalMember ke fungsi finalize
                     _finalizeAndSaveBill(
                       mejaId,
                       member: selectedMemberInDialog,
@@ -326,16 +368,21 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
+  // --- Dialog Set Timer (Tidak berubah signifikan) ---
   Future<void> _showSetTimerDialog(int mejaId) async {
+    // ... (kode _showSetTimerDialog Anda sebelumnya sudah OK) ...
     if (_activeSessions.containsKey(mejaId)) {
       _addLog("Error: Meja $mejaId sudah aktif.");
       return;
     }
     final hoursController = TextEditingController();
     final minutesController = TextEditingController();
-    return showDialog<void>(
+
+    if (!mounted) return;
+
+    await showDialog<void>(
       context: context,
-      builder: (BuildContext context) {
+      builder: (BuildContext dialogContext) {
         return AlertDialog(
           backgroundColor: const Color(0xFF1E1E1E),
           shape:
@@ -369,7 +416,7 @@ class _DashboardPageState extends State<DashboardPage> {
           actions: <Widget>[
             TextButton(
               child: const Text('Batal'),
-              onPressed: () => Navigator.of(context).pop(),
+              onPressed: () => Navigator.of(dialogContext).pop(),
             ),
             ElevatedButton(
               style: ElevatedButton.styleFrom(
@@ -381,9 +428,9 @@ class _DashboardPageState extends State<DashboardPage> {
                 final totalSeconds = (hours * 3600) + (minutes * 60);
                 if (totalSeconds > 0) {
                   _startTimer(mejaId, totalSeconds);
-                  Navigator.of(context).pop();
+                  Navigator.of(dialogContext).pop();
                 } else {
-                  _addLog('Input durasi tidak valid.');
+                  if (mounted) _addLog('Input durasi tidak valid.');
                 }
               },
             ),
@@ -402,9 +449,11 @@ class _DashboardPageState extends State<DashboardPage> {
         _logMessages = _logMessages.substring(0, 3000);
       }
     });
-    if (_logScrollController.hasClients) {
-      _logScrollController.jumpTo(0);
-    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_logScrollController.hasClients) {
+        _logScrollController.jumpTo(0);
+      }
+    });
   }
 
   String _formatDuration(int totalSeconds) {
@@ -420,11 +469,6 @@ class _DashboardPageState extends State<DashboardPage> {
     final format = intl.NumberFormat.currency(
         locale: 'id_ID', symbol: 'Rp ', decimalDigits: 0);
     return format.format(amount);
-  }
-
-  double _calculateCost(Duration duration) {
-    return (duration.inHours * _ratePerHour) +
-        (duration.inMinutes.remainder(60) * _ratePerMinute);
   }
 
   Widget _buildPriceRow(String label, double amount,
@@ -507,7 +551,7 @@ class _DashboardPageState extends State<DashboardPage> {
                   padding: EdgeInsets.fromLTRB(16, 16, 16, panelMinHeight + 16),
                   gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
                     maxCrossAxisExtent: 380,
-                    childAspectRatio: 1.7,
+                    childAspectRatio: 1.7, // Sesuaikan rasio jika perlu
                     crossAxisSpacing: 16,
                     mainAxisSpacing: 16,
                   ),

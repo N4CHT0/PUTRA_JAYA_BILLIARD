@@ -1,31 +1,41 @@
+// lib/pages/products/products_page.dart
+
 import 'package:flutter/material.dart';
+import 'package:hive_flutter/hive_flutter.dart'; // Import Hive Flutter
 import 'package:intl/intl.dart';
-import 'package:putra_jaya_billiard/models/product_model.dart';
-import 'package:putra_jaya_billiard/services/firebase_service.dart';
+// Import model LOKAL
+import 'package:putra_jaya_billiard/models/local_product.dart';
+// Import service LOKAL
+import 'package:putra_jaya_billiard/services/local_database_service.dart';
 
 class ProductsPage extends StatefulWidget {
-  const ProductsPage({super.key});
+  // Hapus kodeOrganisasi jika tidak diperlukan lagi
+  // final String kodeOrganisasi;
+
+  const ProductsPage({super.key}); // Hapus parameter
 
   @override
   State<ProductsPage> createState() => _ProductsPageState();
 }
 
 class _ProductsPageState extends State<ProductsPage> {
-  final FirebaseService _firebaseService = FirebaseService();
+  // Gunakan service LOKAL
+  final LocalDatabaseService _localDbService = LocalDatabaseService();
   final NumberFormat _currencyFormat =
       NumberFormat.currency(locale: 'id_ID', symbol: 'Rp ', decimalDigits: 0);
 
-  // Dialog untuk menambah atau mengedit produk
-  void _showProductDialog({Product? product}) {
+  // Dialog untuk menambah atau mengedit produk (sekarang pakai LocalProduct)
+  void _showProductDialog({LocalProduct? product, dynamic productKey}) {
     final formKey = GlobalKey<FormState>();
     final nameController = TextEditingController(text: product?.name);
     final unitController = TextEditingController(text: product?.unit);
     final purchasePriceController =
-        TextEditingController(text: product?.purchasePrice.toString());
+        TextEditingController(text: product?.purchasePrice.toString() ?? '0');
     final sellingPriceController =
-        TextEditingController(text: product?.sellingPrice.toString());
-    final stockController =
-        TextEditingController(text: product?.stock.toString());
+        TextEditingController(text: product?.sellingPrice.toString() ?? '0');
+    // Stok awal hanya bisa diatur saat tambah produk, saat edit diambil dari data
+    final stockController = TextEditingController(
+        text: product == null ? '0' : product.stock.toString());
     bool isActive = product?.isActive ?? true;
 
     showDialog(
@@ -60,18 +70,45 @@ class _ProductsPageState extends State<ProductsPage> {
                           decoration:
                               const InputDecoration(labelText: 'Harga Jual'),
                           keyboardType: TextInputType.number,
-                          validator: (v) => v!.isEmpty ? 'Wajib diisi' : null),
+                          validator: (v) {
+                            if (v == null ||
+                                v.isEmpty ||
+                                double.tryParse(v) == null ||
+                                double.parse(v) < 0) {
+                              return 'Harga jual tidak valid';
+                            }
+                            return null;
+                          }),
                       TextFormField(
                           controller: purchasePriceController,
                           decoration:
                               const InputDecoration(labelText: 'Harga Beli'),
                           keyboardType: TextInputType.number,
-                          validator: (v) => v!.isEmpty ? 'Wajib diisi' : null),
-                      TextFormField(
-                          controller: stockController,
-                          decoration: const InputDecoration(labelText: 'Stok'),
-                          keyboardType: TextInputType.number,
-                          validator: (v) => v!.isEmpty ? 'Wajib diisi' : null),
+                          validator: (v) {
+                            if (v == null ||
+                                v.isEmpty ||
+                                double.tryParse(v) == null ||
+                                double.parse(v) < 0) {
+                              return 'Harga beli tidak valid';
+                            }
+                            return null;
+                          }),
+                      // Stok hanya bisa diinput saat TAMBAH produk baru
+                      if (product == null)
+                        TextFormField(
+                            controller: stockController,
+                            decoration:
+                                const InputDecoration(labelText: 'Stok Awal'),
+                            keyboardType: TextInputType.number,
+                            validator: (v) {
+                              if (v == null ||
+                                  v.isEmpty ||
+                                  int.tryParse(v) == null ||
+                                  int.parse(v) < 0) {
+                                return 'Stok awal tidak valid';
+                              }
+                              return null;
+                            }),
                       const SizedBox(height: 16),
                       CheckboxListTile(
                         title: const Text('Produk Aktif'),
@@ -94,24 +131,42 @@ class _ProductsPageState extends State<ProductsPage> {
                 child: const Text('Batal')),
             ElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: Colors.teal),
-              onPressed: () {
+              onPressed: () async {
                 if (formKey.currentState!.validate()) {
-                  final newProduct = Product(
-                    id: product?.id,
+                  final newProduct = LocalProduct(
+                    // id tidak perlu diisi saat tambah, Hive akan generate key
                     name: nameController.text,
                     unit: unitController.text,
-                    sellingPrice: double.parse(sellingPriceController.text),
-                    purchasePrice: double.parse(purchasePriceController.text),
-                    stock: int.parse(stockController.text),
+                    sellingPrice:
+                        double.tryParse(sellingPriceController.text) ?? 0,
+                    purchasePrice:
+                        double.tryParse(purchasePriceController.text) ?? 0,
+                    // Saat edit, stok tidak diubah dari sini (diubah via opname/transaksi)
+                    stock: product?.stock ??
+                        int.tryParse(stockController.text) ??
+                        0,
                     isActive: isActive,
                   );
 
-                  if (product == null) {
-                    _firebaseService.addProduct(newProduct);
-                  } else {
-                    _firebaseService.updateProduct(newProduct);
+                  try {
+                    if (product == null) {
+                      // Tambah produk baru ke Hive
+                      await _localDbService.addProduct(newProduct);
+                    } else {
+                      // Update produk yang ada di Hive menggunakan key
+                      await _localDbService.updateProduct(
+                          productKey, newProduct);
+                    }
+                    if (!mounted) return; // Mounted check
+                    Navigator.pop(context);
+                  } catch (e) {
+                    if (!mounted) return;
+                    Navigator.pop(context);
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                      content: Text('Gagal menyimpan: $e'),
+                      backgroundColor: Colors.red,
+                    ));
                   }
-                  Navigator.pop(context);
                 }
               },
               child: const Text('Simpan'),
@@ -122,19 +177,69 @@ class _ProductsPageState extends State<ProductsPage> {
     );
   }
 
+  // Fungsi konfirmasi hapus (sekarang pakai key)
+  Future<void> _showDeleteConfirmation(
+      LocalProduct product, dynamic productKey) async {
+    if (!mounted) return;
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1E1E1E),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Hapus Produk?'),
+        content: Text(
+            'Anda yakin ingin menghapus ${product.name}? Ini akan menghapus data produk secara permanen.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Batal'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Hapus'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      try {
+        await _localDbService
+            .deleteProduct(productKey); // Gunakan key untuk hapus
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('${product.name} berhasil dihapus.'),
+          backgroundColor: Colors.green,
+        ));
+      } catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Gagal menghapus: $e'),
+          backgroundColor: Colors.red,
+        ));
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.transparent,
+      appBar: AppBar(
+        title: const Text('Manajemen Produk'),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+      ),
       body: Padding(
-        padding: const EdgeInsets.fromLTRB(16, kToolbarHeight + 16, 16, 16),
+        padding: const EdgeInsets.all(16.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             ElevatedButton.icon(
               onPressed: () => _showProductDialog(),
               icon: const Icon(Icons.add, size: 18),
-              label: const Text('Add New'),
+              label: const Text('Tambah Produk'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.teal,
                 foregroundColor: Colors.white,
@@ -149,20 +254,15 @@ class _ProductsPageState extends State<ProductsPage> {
                 decoration: BoxDecoration(
                     color: const Color(0xFF1E1E1E).withOpacity(0.5),
                     borderRadius: BorderRadius.circular(12)),
-                child: StreamBuilder<List<Product>>(
-                  stream: _firebaseService.getProductsStream(),
-                  builder: (context, snapshot) {
-                    if (snapshot.connectionState == ConnectionState.waiting) {
-                      return const Center(child: CircularProgressIndicator());
-                    }
-                    if (snapshot.hasError) {
-                      return Center(child: Text('Error: ${snapshot.error}'));
-                    }
-                    if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                // Gunakan ValueListenableBuilder untuk data Hive
+                child: ValueListenableBuilder<Box<LocalProduct>>(
+                  valueListenable: _localDbService.getProductListenable(),
+                  builder: (context, box, _) {
+                    final products = box.values.toList().cast<LocalProduct>();
+
+                    if (products.isEmpty) {
                       return const Center(child: Text('Belum ada produk.'));
                     }
-
-                    final products = snapshot.data!;
 
                     return SingleChildScrollView(
                       scrollDirection: Axis.vertical,
@@ -173,24 +273,35 @@ class _ProductsPageState extends State<ProductsPage> {
                           headingRowColor: MaterialStateProperty.all(
                               Colors.white.withOpacity(0.1)),
                           columns: const [
-                            DataColumn(label: Text('ID')),
                             DataColumn(label: Text('Nama')),
                             DataColumn(label: Text('Satuan')),
-                            DataColumn(label: Text('Harga Jual')),
-                            DataColumn(label: Text('Harga Beli')),
+                            DataColumn(
+                                label: Text('Harga Jual'), numeric: true),
+                            DataColumn(
+                                label: Text('Harga Beli'), numeric: true),
+                            DataColumn(label: Text('Stok'), numeric: true),
                             DataColumn(label: Text('Aktif')),
                             DataColumn(label: Text('Aksi')),
                           ],
                           rows: products.map((product) {
+                            // Dapatkan key Hive untuk item ini
+                            final productKey = product.key;
                             return DataRow(
                               cells: [
-                                DataCell(Text(product.id!.substring(0, 6))),
                                 DataCell(Text(product.name)),
                                 DataCell(Text(product.unit)),
                                 DataCell(Text(_currencyFormat
                                     .format(product.sellingPrice))),
                                 DataCell(Text(_currencyFormat
                                     .format(product.purchasePrice))),
+                                DataCell(Text(product.stock.toString(),
+                                    style: TextStyle(
+                                        color: product.stock <= 5
+                                            ? Colors.redAccent
+                                            : Colors.white,
+                                        fontWeight: product.stock <= 5
+                                            ? FontWeight.bold
+                                            : FontWeight.normal))),
                                 DataCell(
                                   Icon(
                                     product.isActive
@@ -206,7 +317,9 @@ class _ProductsPageState extends State<ProductsPage> {
                                     children: [
                                       ElevatedButton(
                                         onPressed: () => _showProductDialog(
-                                            product: product),
+                                            product: product,
+                                            productKey:
+                                                productKey), // Kirim key
                                         style: ElevatedButton.styleFrom(
                                             backgroundColor: Colors.amber,
                                             foregroundColor: Colors.black,
@@ -216,8 +329,9 @@ class _ProductsPageState extends State<ProductsPage> {
                                       ),
                                       const SizedBox(width: 8),
                                       ElevatedButton(
-                                        onPressed: () => _firebaseService
-                                            .deleteProduct(product.id!),
+                                        onPressed: () =>
+                                            _showDeleteConfirmation(product,
+                                                productKey), // Kirim key
                                         style: ElevatedButton.styleFrom(
                                             backgroundColor: Colors.redAccent,
                                             foregroundColor: Colors.white,

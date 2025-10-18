@@ -1,19 +1,19 @@
-// lib/widgets/transaction_detail_dialog.dart
-
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import '../models/local_transaction.dart'; // Import model LocalTransaction
 
 class TransactionDetailDialog extends StatelessWidget {
-  final Map<String, dynamic> transactionData;
+  // Terima objek LocalTransaction, bukan Map
+  final LocalTransaction transaction;
 
-  const TransactionDetailDialog({super.key, required this.transactionData});
+  const TransactionDetailDialog({super.key, required this.transaction});
 
   @override
   Widget build(BuildContext context) {
     final formatter =
         NumberFormat.currency(locale: 'id_ID', symbol: 'Rp ', decimalDigits: 0);
-    final type = transactionData['type'] ?? 'unknown';
+    // Ambil tipe langsung dari properti objek
+    final type = transaction.type;
 
     return AlertDialog(
       backgroundColor: const Color(0xFF2c2c2c),
@@ -45,47 +45,56 @@ class TransactionDetailDialog extends StatelessWidget {
   }
 
   Widget _buildBilliardDetails(NumberFormat formatter) {
-    final startTime = (transactionData['startTime'] as Timestamp).toDate();
-    final endTime = (transactionData['endTime'] as Timestamp).toDate();
-    final duration =
-        Duration(seconds: transactionData['durationInSeconds'] ?? 0);
+    // Ambil data langsung dari objek 'transaction', dan tangani nilai null
+    final startTime = transaction.startTime;
+    final endTime = transaction.endTime;
+    final duration = Duration(seconds: transaction.durationInSeconds ?? 0);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
         _buildDetailRow('Jenis', 'Billing Meja'),
-        if (transactionData.containsKey('memberName'))
-          _buildDetailRow('Pelanggan', transactionData['memberName']),
-        _buildDetailRow('Meja', '${transactionData['tableId']}'),
-        _buildDetailRow('Kasir', transactionData['cashierName'] ?? 'N/A'),
-        _buildDetailRow('Waktu Mulai',
-            DateFormat('dd MMM yyyy, HH:mm:ss').format(startTime)),
-        _buildDetailRow('Waktu Selesai',
-            DateFormat('dd MMM yyyy, HH:mm:ss').format(endTime)),
+        // Tampilkan memberName jika ada dan tidak null/kosong
+        if (transaction.memberName != null &&
+            transaction.memberName!.isNotEmpty)
+          _buildDetailRow('Pelanggan', transaction.memberName!),
+        _buildDetailRow('Meja', '${transaction.tableId ?? 'N/A'}'),
+        _buildDetailRow('Kasir', transaction.cashierName),
+        // Format DateTime, beri nilai default jika null
+        _buildDetailRow(
+            'Waktu Mulai',
+            startTime != null
+                ? DateFormat('dd MMM yyyy, HH:mm:ss').format(startTime)
+                : 'N/A'),
+        _buildDetailRow(
+            'Waktu Selesai',
+            endTime != null
+                ? DateFormat('dd MMM yyyy, HH:mm:ss').format(endTime)
+                : 'N/A'),
         _buildDetailRow('Durasi',
             "${duration.inHours}j ${duration.inMinutes.remainder(60)}m ${duration.inSeconds.remainder(60)}d"),
         const Divider(height: 20, color: Colors.white24),
-        _buildDetailRow(
-            'Total', formatter.format(transactionData['totalAmount']),
+        _buildDetailRow('Total', formatter.format(transaction.totalAmount),
             isTotal: true),
       ],
     );
   }
 
   Widget _buildPosDetails(NumberFormat formatter) {
-    final items = (transactionData['items'] as List<dynamic>);
+    // Ambil data langsung dan tangani null
+    final items = transaction.items ?? [];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
         _buildDetailRow('Jenis', 'Penjualan POS'),
-        if (transactionData.containsKey('memberName'))
-          _buildDetailRow('Pelanggan', transactionData['memberName']),
-        _buildDetailRow('Kasir', transactionData['cashierName'] ?? 'N/A'),
-        _buildDetailRow(
-            'Waktu',
-            DateFormat('dd MMM yyyy, HH:mm')
-                .format((transactionData['createdAt'] as Timestamp).toDate())),
+        if (transaction.memberName != null &&
+            transaction.memberName!.isNotEmpty)
+          _buildDetailRow('Pelanggan', transaction.memberName!),
+        _buildDetailRow('Kasir', transaction.cashierName),
+        _buildDetailRow('Waktu',
+            DateFormat('dd MMM yyyy, HH:mm').format(transaction.createdAt)),
         const Divider(height: 20, color: Colors.white24),
         const Text('Daftar Item:',
             style: TextStyle(fontWeight: FontWeight.bold)),
@@ -98,26 +107,24 @@ class TransactionDetailDialog extends StatelessWidget {
           );
         }).toList(),
         const Divider(height: 20, color: Colors.white24),
-        _buildDetailRow(
-            'Total', formatter.format(transactionData['totalAmount']),
+        _buildDetailRow('Total', formatter.format(transaction.totalAmount),
             isTotal: true),
       ],
     );
   }
 
   Widget _buildPurchaseDetails(NumberFormat formatter) {
-    final items = (transactionData['items'] as List<dynamic>);
+    final items = transaction.items ?? [];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
         _buildDetailRow('Jenis', 'Pembelian Stok'),
-        _buildDetailRow('Supplier', transactionData['supplierName'] ?? 'N/A'),
-        _buildDetailRow('Dicatat oleh', transactionData['userName'] ?? 'N/A'),
-        _buildDetailRow(
-            'Waktu',
-            DateFormat('dd MMM yyyy, HH:mm')
-                .format((transactionData['createdAt'] as Timestamp).toDate())),
+        _buildDetailRow('Supplier', transaction.supplierName ?? 'N/A'),
+        _buildDetailRow('Dicatat oleh',
+            transaction.cashierName), // asumsi kasir yg mencatat
+        _buildDetailRow('Waktu',
+            DateFormat('dd MMM yyyy, HH:mm').format(transaction.createdAt)),
         const Divider(height: 20, color: Colors.white24),
         const Text('Daftar Item:',
             style: TextStyle(fontWeight: FontWeight.bold)),
@@ -130,8 +137,7 @@ class TransactionDetailDialog extends StatelessWidget {
           );
         }).toList(),
         const Divider(height: 20, color: Colors.white24),
-        _buildDetailRow(
-            'Total', formatter.format(transactionData['totalAmount']),
+        _buildDetailRow('Total', formatter.format(transaction.totalAmount),
             isTotal: true),
       ],
     );

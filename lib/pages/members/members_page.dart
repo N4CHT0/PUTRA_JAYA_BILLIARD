@@ -1,23 +1,24 @@
 import 'package:flutter/material.dart';
-import 'package:putra_jaya_billiard/models/member_model.dart';
-import 'package:putra_jaya_billiard/services/firebase_service.dart';
+import 'package:hive_flutter/hive_flutter.dart';
+import 'package:intl/intl.dart';
+import 'package:putra_jaya_billiard/models/local_member.dart';
+import 'package:putra_jaya_billiard/services/local_database_service.dart';
 
 class MembersPage extends StatefulWidget {
   const MembersPage({super.key});
-//INTERNAL_ERROR_DO_NOT_USE
+
   @override
   State<MembersPage> createState() => _MembersPageState();
 }
 
 class _MembersPageState extends State<MembersPage> {
-  final FirebaseService _firebaseService = FirebaseService();
+  final LocalDatabaseService _localDbService = LocalDatabaseService();
 
-  void _showMemberDialog({Member? member}) {
+  void _showMemberDialog({LocalMember? member, dynamic memberKey}) {
     final formKey = GlobalKey<FormState>();
     final nameController = TextEditingController(text: member?.name);
     final addressController = TextEditingController(text: member?.address);
     final phoneController = TextEditingController(text: member?.phone);
-    // Controller untuk diskon
     final discountController = TextEditingController(
         text: member?.discountPercentage.toString() ?? '0');
     bool isActive = member?.isActive ?? true;
@@ -55,13 +56,21 @@ class _MembersPageState extends State<MembersPage> {
                               const InputDecoration(labelText: 'No. Telepon'),
                           keyboardType: TextInputType.phone,
                           validator: (v) => v!.isEmpty ? 'Wajib diisi' : null),
-                      // Field baru untuk input diskon
                       TextFormField(
                           controller: discountController,
                           decoration: const InputDecoration(
                               labelText: 'Diskon (%)', hintText: 'Contoh: 10'),
                           keyboardType: TextInputType.number,
-                          validator: (v) => v!.isEmpty ? 'Wajib diisi' : null),
+                          validator: (v) {
+                            if (v == null ||
+                                v.isEmpty ||
+                                double.tryParse(v) == null ||
+                                double.parse(v) < 0 ||
+                                double.parse(v) > 100) {
+                              return 'Masukkan diskon 0-100';
+                            }
+                            return null;
+                          }),
                       const SizedBox(height: 16),
                       CheckboxListTile(
                         title: const Text('Member Aktif'),
@@ -84,26 +93,34 @@ class _MembersPageState extends State<MembersPage> {
                 child: const Text('Batal')),
             ElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: Colors.teal),
-              onPressed: () {
+              onPressed: () async {
                 if (formKey.currentState!.validate()) {
-                  final newMember = Member(
-                    id: member?.id,
+                  final newMember = LocalMember(
                     name: nameController.text,
                     address: addressController.text,
                     phone: phoneController.text,
                     joinDate: member?.joinDate ?? DateTime.now(),
                     isActive: isActive,
-                    // Ambil nilai diskon dari controller
                     discountPercentage:
                         double.tryParse(discountController.text) ?? 0,
                   );
 
-                  if (member == null) {
-                    _firebaseService.addMember(newMember);
-                  } else {
-                    _firebaseService.updateMember(newMember);
+                  try {
+                    if (member == null) {
+                      await _localDbService.addMember(newMember);
+                    } else {
+                      await _localDbService.updateMember(memberKey, newMember);
+                    }
+                    if (!mounted) return;
+                    Navigator.pop(context);
+                  } catch (e) {
+                    if (!mounted) return;
+                    Navigator.pop(context);
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                      content: Text('Gagal menyimpan: $e'),
+                      backgroundColor: Colors.red,
+                    ));
                   }
-                  Navigator.pop(context);
                 }
               },
               child: const Text('Simpan'),
@@ -114,19 +131,66 @@ class _MembersPageState extends State<MembersPage> {
     );
   }
 
+  Future<void> _showDeleteConfirmation(
+      LocalMember member, dynamic memberKey) async {
+    if (!mounted) return;
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1E1E1E),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Hapus Member?'),
+        content: Text('Anda yakin ingin menghapus ${member.name}?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Batal'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Hapus'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      try {
+        await _localDbService.deleteMember(memberKey);
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('${member.name} berhasil dihapus.'),
+          backgroundColor: Colors.green,
+        ));
+      } catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Gagal menghapus: $e'),
+          backgroundColor: Colors.red,
+        ));
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.transparent,
+      appBar: AppBar(
+        title: const Text('Manajemen Member'),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+      ),
       body: Padding(
-        padding: const EdgeInsets.fromLTRB(16, kToolbarHeight + 16, 16, 16),
+        padding: const EdgeInsets.all(16.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             ElevatedButton.icon(
               onPressed: () => _showMemberDialog(),
               icon: const Icon(Icons.add, size: 18),
-              label: const Text('Add New'),
+              label: const Text('Tambah Member'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.teal,
                 foregroundColor: Colors.white,
@@ -141,16 +205,17 @@ class _MembersPageState extends State<MembersPage> {
                 decoration: BoxDecoration(
                     color: const Color(0xFF1E1E1E).withOpacity(0.5),
                     borderRadius: BorderRadius.circular(12)),
-                child: StreamBuilder<List<Member>>(
-                  stream: _firebaseService.getMembersStream(),
-                  builder: (context, snapshot) {
-                    if (snapshot.connectionState == ConnectionState.waiting) {
-                      return const Center(child: CircularProgressIndicator());
-                    }
-                    if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                child: ValueListenableBuilder<Box<LocalMember>>(
+                  valueListenable: _localDbService.getMemberListenable(),
+                  builder: (context, box, _) {
+                    final members = box.values.toList().cast<LocalMember>();
+                    members.sort((a, b) =>
+                        a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+
+                    if (members.isEmpty) {
                       return const Center(child: Text('Belum ada member.'));
                     }
-                    final members = snapshot.data!;
+
                     return SingleChildScrollView(
                       scrollDirection: Axis.vertical,
                       child: SingleChildScrollView(
@@ -160,23 +225,24 @@ class _MembersPageState extends State<MembersPage> {
                           headingRowColor: MaterialStateProperty.all(
                               Colors.white.withOpacity(0.1)),
                           columns: const [
-                            DataColumn(label: Text('ID')),
                             DataColumn(label: Text('Nama')),
                             DataColumn(label: Text('Alamat')),
                             DataColumn(label: Text('Telepon')),
+                            DataColumn(label: Text('Tgl. Bergabung')),
                             DataColumn(
                                 label: Text('Diskon (%)'), numeric: true),
                             DataColumn(label: Text('Aktif')),
                             DataColumn(label: Text('Aksi')),
                           ],
                           rows: members.map((member) {
+                            final memberKey = member.key;
                             return DataRow(
                               cells: [
-                                DataCell(Text(member.id!.substring(0, 6))),
                                 DataCell(Text(member.name)),
                                 DataCell(Text(member.address)),
                                 DataCell(Text(member.phone)),
-                                // Tampilkan nilai diskon
+                                DataCell(Text(DateFormat('dd/MM/yyyy')
+                                    .format(member.joinDate))),
                                 DataCell(Text('${member.discountPercentage}%')),
                                 DataCell(
                                   Icon(
@@ -192,8 +258,9 @@ class _MembersPageState extends State<MembersPage> {
                                   Row(
                                     children: [
                                       ElevatedButton(
-                                        onPressed: () =>
-                                            _showMemberDialog(member: member),
+                                        onPressed: () => _showMemberDialog(
+                                            member: member,
+                                            memberKey: memberKey),
                                         style: ElevatedButton.styleFrom(
                                             backgroundColor: Colors.amber,
                                             foregroundColor: Colors.black,
@@ -203,8 +270,9 @@ class _MembersPageState extends State<MembersPage> {
                                       ),
                                       const SizedBox(width: 8),
                                       ElevatedButton(
-                                        onPressed: () => _firebaseService
-                                            .deleteMember(member.id!),
+                                        onPressed: () =>
+                                            _showDeleteConfirmation(
+                                                member, memberKey),
                                         style: ElevatedButton.styleFrom(
                                             backgroundColor: Colors.redAccent,
                                             foregroundColor: Colors.white,

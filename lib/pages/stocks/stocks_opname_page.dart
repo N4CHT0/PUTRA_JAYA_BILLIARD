@@ -1,24 +1,40 @@
-// lib/pages/stock_opname/stock_opname_page.dart
+// lib/pages/stocks/stocks_opname_page.dart
 
 import 'package:flutter/material.dart';
-import 'package:putra_jaya_billiard/models/product_model.dart';
-import 'package:putra_jaya_billiard/models/stock_adjustment_model.dart';
+import 'package:flutter/widgets.dart';
+import 'package:hive_flutter/hive_flutter.dart'; // Import Hive
+// Import model LOKAL
+import 'package:putra_jaya_billiard/models/local_product.dart';
+import 'package:putra_jaya_billiard/models/local_stock_mutation.dart';
+// Import user model (masih dari Firebase Auth)
 import 'package:putra_jaya_billiard/models/user_model.dart';
-import 'package:putra_jaya_billiard/services/firebase_service.dart';
+// Import service LOKAL
+import 'package:putra_jaya_billiard/services/local_database_service.dart';
 
 class StockOpnamePage extends StatefulWidget {
-  final UserModel currentUser;
-  const StockOpnamePage({super.key, required this.currentUser});
+  final UserModel currentUser; // User info dari Firebase Auth
+  // Hapus kodeOrganisasi
+  // final String kodeOrganisasi;
+
+  const StockOpnamePage({
+    super.key,
+    required this.currentUser,
+    // required this.kodeOrganisasi, // Hapus
+  });
 
   @override
   State<StockOpnamePage> createState() => _StockOpnamePageState();
 }
 
 class _StockOpnamePageState extends State<StockOpnamePage> {
-  final FirebaseService _firebaseService = FirebaseService();
-  final Map<String, TextEditingController> _controllers = {};
+  // Gunakan service LOKAL
+  final LocalDatabaseService _localDbService = LocalDatabaseService();
+  // Simpan controller dalam Map<dynamic, TextEditingController>
+  // karena key Hive bisa jadi int atau String
+  final Map<dynamic, TextEditingController> _controllers = {};
   String _searchQuery = '';
-  List<Product> _allProducts = []; // Simpan daftar produk lengkap di state
+  // Simpan daftar produk lengkap di state untuk referensi saat menyimpan
+  List<LocalProduct> _allProducts = [];
 
   @override
   void dispose() {
@@ -26,29 +42,38 @@ class _StockOpnamePageState extends State<StockOpnamePage> {
     super.dispose();
   }
 
-  // --- FUNGSI YANG DIPERBAIKI ---
-  void _saveAdjustments() {
-    final List<StockAdjustment> adjustments = [];
+  // --- Fungsi Simpan Penyesuaian (Diubah Total) ---
+  void _saveAdjustments() async {
+    // Jadikan async
+    final List<LocalStockMutation> mutations = []; // Simpan mutasi di sini
+    final Map<dynamic, int> adjustments = {}; // Simpan key dan stok baru
 
-    // Iterasi melalui daftar produk yang ada di state, bukan controllers
+    // Iterasi melalui daftar produk yang ditampilkan/disimpan di state
     for (var product in _allProducts) {
-      final controller = _controllers[product.id!];
-      // Cek apakah ada controller dan isinya tidak kosong
+      final key = product.key; // Dapatkan key Hive produk
+      final controller = _controllers[key];
+
+      // Cek jika ada controller dan isinya diinput angka
       if (controller != null && controller.text.isNotEmpty) {
         final physicalCount = int.tryParse(controller.text);
 
-        // Cek jika ada perubahan antara stok sistem dan stok fisik yang diinput
+        // Cek jika ada perubahan antara stok sistem (product.stock) dan stok fisik
         if (physicalCount != null && product.stock != physicalCount) {
-          adjustments.add(
-            StockAdjustment(
-              productId: product.id!,
+          // Tambahkan ke map adjustments untuk update produk nanti
+          adjustments[key] = physicalCount;
+
+          // Buat objek mutasi stok
+          mutations.add(
+            LocalStockMutation(
+              productId: key.toString(), // Simpan key Hive sbg ID
               productName: product.name,
-              previousStock: product.stock,
-              newStock: physicalCount,
-              reason: 'Stok Opname',
+              type: 'adjustment', // Tipe penyesuaian
+              quantityChange: physicalCount - product.stock, // Perbedaan
+              stockBefore: product.stock,
+              notes: 'Stok Opname',
+              date: DateTime.now(),
               userId: widget.currentUser.uid,
               userName: widget.currentUser.nama,
-              adjustmentDate: DateTime.now(),
             ),
           );
         }
@@ -56,6 +81,7 @@ class _StockOpnamePageState extends State<StockOpnamePage> {
     }
 
     if (adjustments.isEmpty) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
             content: Text('Tidak ada perubahan stok untuk disimpan.')),
@@ -63,11 +89,9 @@ class _StockOpnamePageState extends State<StockOpnamePage> {
       return;
     }
 
-    _showConfirmationDialog(adjustments);
-  }
-
-  void _showConfirmationDialog(List<StockAdjustment> adjustments) {
-    showDialog(
+    // Tampilkan dialog konfirmasi sebelum menyimpan
+    if (!mounted) return;
+    final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF2c2c2c),
@@ -77,35 +101,54 @@ class _StockOpnamePageState extends State<StockOpnamePage> {
             'Anda akan menyesuaikan stok untuk ${adjustments.length} produk. Lanjutkan?'),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(ctx), child: const Text('Batal')),
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Batal')),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.teal),
-            onPressed: () async {
-              try {
-                await _firebaseService.performStockAdjustment(
-                    adjustments, widget.currentUser);
-                Navigator.pop(ctx);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                      content: Text('Stok berhasil disesuaikan!'),
-                      backgroundColor: Colors.green),
-                );
-                // Kosongkan semua controller setelah berhasil
-                _controllers.forEach((key, value) => value.clear());
-                setState(() {});
-              } catch (e) {
-                Navigator.pop(ctx);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                      content: Text('Error: $e'), backgroundColor: Colors.red),
-                );
-              }
-            },
+            onPressed: () => Navigator.pop(ctx, true), // Konfirmasi simpan
             child: const Text('Simpan'),
           ),
         ],
       ),
     );
+
+    if (confirm == true) {
+      if (!mounted) return; // Mounted check sebelum async utama
+      try {
+        // Simpan semua mutasi stok ke Hive
+        for (var mutation in mutations) {
+          await _localDbService.addStockMutation(mutation);
+        }
+
+        // Update stok produk di Hive satu per satu
+        adjustments.forEach((key, newStock) async {
+          // Dapatkan produk asli dari box untuk update
+          final productToUpdate = _localDbService.getProductByKey(key);
+          if (productToUpdate != null) {
+            productToUpdate.stock = newStock;
+            await _localDbService.updateProduct(key, productToUpdate);
+          }
+        });
+
+        if (!mounted) return; // Mounted check setelah async
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('Stok berhasil disesuaikan!'),
+              backgroundColor: Colors.green),
+        );
+        // Kosongkan semua controller setelah berhasil
+        _controllers.forEach((key, value) => value.clear());
+        setState(() {}); // Refresh UI
+      } catch (e, s) {
+        // Tambah stack trace
+        print('Error saving adjustments: $e');
+        print(s);
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
   }
 
   @override
@@ -120,7 +163,7 @@ class _StockOpnamePageState extends State<StockOpnamePage> {
           IconButton(
             icon: const Icon(Icons.save),
             tooltip: 'Simpan Perubahan',
-            onPressed: _saveAdjustments,
+            onPressed: _saveAdjustments, // Panggil fungsi simpan yang baru
           ),
         ],
       ),
@@ -145,33 +188,41 @@ class _StockOpnamePageState extends State<StockOpnamePage> {
                 decoration: BoxDecoration(
                     color: const Color(0xFF1E1E1E).withOpacity(0.5),
                     borderRadius: BorderRadius.circular(12)),
-                child: StreamBuilder<List<Product>>(
-                  stream: _firebaseService.getProductsStream(),
-                  builder: (context, snapshot) {
-                    if (snapshot.connectionState == ConnectionState.waiting) {
-                      return const Center(child: CircularProgressIndicator());
-                    }
-                    if (snapshot.hasError) {
-                      return Center(child: Text('Error: ${snapshot.error}'));
-                    }
-                    if (!snapshot.hasData || snapshot.data!.isEmpty) {
-                      return const Center(child: Text('Tidak ada produk.'));
-                    }
-
-                    _allProducts =
-                        snapshot.data!; // Simpan data produk ke state
+                // Gunakan ValueListenableBuilder untuk produk dari Hive
+                child: ValueListenableBuilder<Box<LocalProduct>>(
+                  valueListenable: _localDbService.getProductListenable(),
+                  builder: (context, box, _) {
+                    // Filter produk berdasarkan search query
+                    _allProducts = box.values
+                        .toList()
+                        .cast<LocalProduct>(); // Update list lengkap
                     final filteredProducts = _allProducts
                         .where(
                             (p) => p.name.toLowerCase().contains(_searchQuery))
                         .toList();
+                    // Urutkan berdasarkan nama
+                    filteredProducts.sort((a, b) =>
+                        a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+
+                    if (filteredProducts.isEmpty && _searchQuery.isEmpty) {
+                      return const Center(child: Text('Tidak ada produk.'));
+                    } else if (filteredProducts.isEmpty &&
+                        _searchQuery.isNotEmpty) {
+                      return Center(
+                          child:
+                              Text('Produk "$_searchQuery" tidak ditemukan.'));
+                    }
 
                     return ListView.builder(
                       padding: const EdgeInsets.all(8.0),
                       itemCount: filteredProducts.length,
                       itemBuilder: (context, index) {
                         final product = filteredProducts[index];
+                        final productKey = product.key; // Dapatkan key Hive
+
+                        // Buat controller jika belum ada untuk key ini
                         _controllers.putIfAbsent(
-                            product.id!, () => TextEditingController());
+                            productKey, () => TextEditingController());
 
                         return Card(
                           color: Colors.black.withOpacity(0.2),
@@ -181,15 +232,15 @@ class _StockOpnamePageState extends State<StockOpnamePage> {
                             subtitle: Text(
                                 'Stok Sistem: ${product.stock} ${product.unit}'),
                             trailing: SizedBox(
-                              width: 120,
+                              width: 120, // Lebar field input stok fisik
                               child: TextField(
-                                controller: _controllers[product.id!],
+                                controller: _controllers[productKey],
                                 textAlign: TextAlign.center,
                                 keyboardType: TextInputType.number,
                                 decoration: const InputDecoration(
                                   labelText: 'Stok Fisik',
                                   border: OutlineInputBorder(),
-                                  isDense: true,
+                                  isDense: true, // Agar lebih ringkas
                                 ),
                               ),
                             ),

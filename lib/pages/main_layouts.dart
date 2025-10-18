@@ -1,3 +1,5 @@
+// lib/layout/main_layout.dart
+
 import 'package:flutter/material.dart';
 import 'package:putra_jaya_billiard/models/user_model.dart';
 import 'package:putra_jaya_billiard/pages/accounts/accounts_page.dart';
@@ -7,6 +9,7 @@ import 'package:putra_jaya_billiard/pages/pos/pos_page.dart';
 import 'package:putra_jaya_billiard/pages/products/products_page.dart';
 import 'package:putra_jaya_billiard/pages/purchases/purchase_page.dart';
 import 'package:putra_jaya_billiard/pages/reports/reports_page.dart';
+import 'package:putra_jaya_billiard/pages/settings/general_settings_page.dart'; // Import halaman baru
 import 'package:putra_jaya_billiard/pages/settings/settings_page.dart';
 import 'package:putra_jaya_billiard/pages/stocks/stock_card_page.dart';
 import 'package:putra_jaya_billiard/pages/stocks/stock_report_page.dart';
@@ -20,12 +23,12 @@ import 'package:window_manager/window_manager.dart';
 
 class MainLayout extends StatefulWidget {
   final UserModel user;
-  final ArduinoService arduinoService; // Service diterima dari luar
+  final ArduinoService arduinoService;
 
   const MainLayout({
     super.key,
     required this.user,
-    required this.arduinoService, // Wajib diisi saat memanggil MainLayout
+    required this.arduinoService,
   });
 
   @override
@@ -44,17 +47,15 @@ class _MainLayoutState extends State<MainLayout> {
 
   @override
   void dispose() {
-    // Membersihkan service saat MainLayout tidak lagi digunakan
     widget.arduinoService.dispose();
     super.dispose();
   }
 
-  // Membangun daftar halaman berdasarkan role pengguna untuk efisiensi
   void _buildPages() {
     // Halaman yang bisa diakses semua role
     _pageMap[0] = DashboardPage(
       user: widget.user,
-      arduinoService: widget.arduinoService, // Service diteruskan ke Dashboard
+      arduinoService: widget.arduinoService,
     );
     _pageMap[1] = ReportsPage(userRole: widget.user.role);
     _pageMap[6] = PosPage(currentUser: widget.user);
@@ -71,28 +72,26 @@ class _MainLayoutState extends State<MainLayout> {
       _pageMap[7] = const SuppliersPage();
       _pageMap[10] = StockOpnamePage(currentUser: widget.user);
       _pageMap[12] = const MembersPage();
+      // Tambahkan halaman General Settings di sini
+      _pageMap[13] = const GeneralSettingsPage();
     }
   }
 
-  // Fungsi untuk kembali ke Dashboard (dipanggil dari Settings & AppBar)
   void _switchToDashboard() {
     setState(() {
       _selectedIndex = 0;
     });
   }
 
-  // Fungsi yang dipanggil dari AppDrawer untuk mengganti halaman
   void _onPageSelected(int index) {
     if (_pageMap.containsKey(index)) {
       setState(() {
         _selectedIndex = index;
       });
     } else {
-      // Kembali ke dashboard jika halaman tidak tersedia untuk role ini
       setState(() {
         _selectedIndex = 0;
       });
-      // Beri notifikasi jika mencoba akses halaman admin
       if (widget.user.role != 'admin') {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -104,7 +103,6 @@ class _MainLayoutState extends State<MainLayout> {
     }
   }
 
-  // Fungsi untuk toggle fullscreen
   void _toggleNativeFullscreen() async {
     bool isFull = await windowManager.isFullScreen();
     windowManager.setFullScreen(!isFull);
@@ -116,8 +114,7 @@ class _MainLayoutState extends State<MainLayout> {
       extendBodyBehindAppBar: true,
       appBar: CustomAppBar(
         user: widget.user,
-        onSettingsChanged: () =>
-            _onPageSelected(4), // Arahkan ke halaman settings
+        onSettingsChanged: () => _onPageSelected(4),
         onGoHome: _switchToDashboard,
         onGoToPOS: () => _onPageSelected(6),
         onToggleFullscreen: _toggleNativeFullscreen,
@@ -131,11 +128,11 @@ class _MainLayoutState extends State<MainLayout> {
             end: Alignment.bottomRight,
           ),
         ),
-        // IndexedStack menjaga state setiap halaman agar tidak hilang saat berpindah
         child: IndexedStack(
           index: _selectedIndex,
+          // Ubah angka menjadi 14 (indeks tertinggi 13 + 1)
           children: List.generate(
-            13, // Indeks tertinggi (12) + 1
+            14,
             (index) =>
                 _pageMap[index] ??
                 const Center(

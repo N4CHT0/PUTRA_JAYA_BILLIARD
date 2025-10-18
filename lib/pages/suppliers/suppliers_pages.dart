@@ -1,20 +1,27 @@
-// lib/pages/suppliers/suppliers_page.dart
+// lib/pages/suppliers/suppliers_pages.dart
 
 import 'package:flutter/material.dart';
-import 'package:putra_jaya_billiard/models/supplier_model.dart';
-import 'package:putra_jaya_billiard/services/firebase_service.dart';
+import 'package:hive_flutter/hive_flutter.dart'; // Import Hive Flutter
+// Import model LOKAL
+import 'package:putra_jaya_billiard/models/local_supplier.dart';
+// Import service LOKAL
+import 'package:putra_jaya_billiard/services/local_database_service.dart';
 
 class SuppliersPage extends StatefulWidget {
-  const SuppliersPage({super.key});
+  // Hapus kodeOrganisasi jika tidak diperlukan lagi
+  // final String kodeOrganisasi;
+
+  const SuppliersPage({super.key}); // Hapus parameter
 
   @override
   State<SuppliersPage> createState() => _SuppliersPageState();
 }
 
 class _SuppliersPageState extends State<SuppliersPage> {
-  final FirebaseService _firebaseService = FirebaseService();
+  // Gunakan service LOKAL
+  final LocalDatabaseService _localDbService = LocalDatabaseService();
 
-  void _showSupplierDialog({Supplier? supplier}) {
+  void _showSupplierDialog({LocalSupplier? supplier, dynamic supplierKey}) {
     final formKey = GlobalKey<FormState>();
     final nameController = TextEditingController(text: supplier?.name);
     final addressController = TextEditingController(text: supplier?.address);
@@ -77,22 +84,35 @@ class _SuppliersPageState extends State<SuppliersPage> {
                 child: const Text('Batal')),
             ElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: Colors.teal),
-              onPressed: () {
+              onPressed: () async {
                 if (formKey.currentState!.validate()) {
-                  final newSupplier = Supplier(
-                    id: supplier?.id,
+                  final newSupplier = LocalSupplier(
+                    // id tidak diisi manual saat tambah
                     name: nameController.text,
                     address: addressController.text,
                     phone: phoneController.text,
                     isActive: isActive,
                   );
 
-                  if (supplier == null) {
-                    _firebaseService.addSupplier(newSupplier);
-                  } else {
-                    _firebaseService.updateSupplier(newSupplier);
+                  try {
+                    if (supplier == null) {
+                      // Tambah supplier baru ke Hive
+                      await _localDbService.addSupplier(newSupplier);
+                    } else {
+                      // Update supplier yang ada di Hive menggunakan key
+                      await _localDbService.updateSupplier(
+                          supplierKey, newSupplier);
+                    }
+                    if (!mounted) return;
+                    Navigator.pop(context);
+                  } catch (e) {
+                    if (!mounted) return;
+                    Navigator.pop(context);
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                      content: Text('Gagal menyimpan: $e'),
+                      backgroundColor: Colors.red,
+                    ));
                   }
-                  Navigator.pop(context);
                 }
               },
               child: const Text('Simpan'),
@@ -103,19 +123,66 @@ class _SuppliersPageState extends State<SuppliersPage> {
     );
   }
 
+  Future<void> _showDeleteConfirmation(
+      LocalSupplier supplier, dynamic supplierKey) async {
+    if (!mounted) return;
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1E1E1E),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Hapus Supplier?'),
+        content: Text('Anda yakin ingin menghapus ${supplier.name}?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Batal'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Hapus'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      try {
+        await _localDbService.deleteSupplier(supplierKey); // Gunakan key
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('${supplier.name} berhasil dihapus.'),
+          backgroundColor: Colors.green,
+        ));
+      } catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Gagal menghapus: $e'),
+          backgroundColor: Colors.red,
+        ));
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.transparent,
+      appBar: AppBar(
+        title: const Text('Manajemen Supplier'),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+      ),
       body: Padding(
-        padding: const EdgeInsets.fromLTRB(16, kToolbarHeight + 16, 16, 16),
+        padding: const EdgeInsets.all(16.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             ElevatedButton.icon(
               onPressed: () => _showSupplierDialog(),
               icon: const Icon(Icons.add, size: 18),
-              label: const Text('Add New'),
+              label: const Text('Tambah Supplier'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.teal,
                 foregroundColor: Colors.white,
@@ -130,20 +197,18 @@ class _SuppliersPageState extends State<SuppliersPage> {
                 decoration: BoxDecoration(
                     color: const Color(0xFF1E1E1E).withOpacity(0.5),
                     borderRadius: BorderRadius.circular(12)),
-                child: StreamBuilder<List<Supplier>>(
-                  stream: _firebaseService.getSuppliersStream(),
-                  builder: (context, snapshot) {
-                    if (snapshot.connectionState == ConnectionState.waiting) {
-                      return const Center(child: CircularProgressIndicator());
-                    }
-                    if (snapshot.hasError) {
-                      return Center(child: Text('Error: ${snapshot.error}'));
-                    }
-                    if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                // Gunakan ValueListenableBuilder untuk data Hive
+                child: ValueListenableBuilder<Box<LocalSupplier>>(
+                  valueListenable: _localDbService.getSupplierListenable(),
+                  builder: (context, box, _) {
+                    final suppliers = box.values.toList().cast<LocalSupplier>();
+                    // Urutkan berdasarkan nama jika perlu
+                    suppliers.sort((a, b) =>
+                        a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+
+                    if (suppliers.isEmpty) {
                       return const Center(child: Text('Belum ada supplier.'));
                     }
-
-                    final suppliers = snapshot.data!;
 
                     return SingleChildScrollView(
                       scrollDirection: Axis.vertical,
@@ -154,7 +219,6 @@ class _SuppliersPageState extends State<SuppliersPage> {
                           headingRowColor: MaterialStateProperty.all(
                               Colors.white.withOpacity(0.1)),
                           columns: const [
-                            DataColumn(label: Text('ID')),
                             DataColumn(label: Text('Nama')),
                             DataColumn(label: Text('Alamat')),
                             DataColumn(label: Text('Telepon')),
@@ -162,9 +226,10 @@ class _SuppliersPageState extends State<SuppliersPage> {
                             DataColumn(label: Text('Aksi')),
                           ],
                           rows: suppliers.map((supplier) {
+                            final supplierKey =
+                                supplier.key; // Dapatkan key Hive
                             return DataRow(
                               cells: [
-                                DataCell(Text(supplier.id!.substring(0, 6))),
                                 DataCell(Text(supplier.name)),
                                 DataCell(Text(supplier.address)),
                                 DataCell(Text(supplier.phone)),
@@ -183,7 +248,9 @@ class _SuppliersPageState extends State<SuppliersPage> {
                                     children: [
                                       ElevatedButton(
                                         onPressed: () => _showSupplierDialog(
-                                            supplier: supplier),
+                                            supplier: supplier,
+                                            supplierKey:
+                                                supplierKey), // Kirim key
                                         style: ElevatedButton.styleFrom(
                                             backgroundColor: Colors.amber,
                                             foregroundColor: Colors.black,
@@ -193,8 +260,9 @@ class _SuppliersPageState extends State<SuppliersPage> {
                                       ),
                                       const SizedBox(width: 8),
                                       ElevatedButton(
-                                        onPressed: () => _firebaseService
-                                            .deleteSupplier(supplier.id!),
+                                        onPressed: () =>
+                                            _showDeleteConfirmation(supplier,
+                                                supplierKey), // Kirim key
                                         style: ElevatedButton.styleFrom(
                                             backgroundColor: Colors.redAccent,
                                             foregroundColor: Colors.white,
