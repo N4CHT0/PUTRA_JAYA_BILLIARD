@@ -4,6 +4,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart' as intl;
 import 'package:putra_jaya_billiard/models/billing_transaction.dart';
+import 'package:putra_jaya_billiard/models/member_model.dart';
 import 'package:putra_jaya_billiard/models/relay_data.dart';
 import 'package:putra_jaya_billiard/models/user_model.dart';
 import 'package:putra_jaya_billiard/services/arduino_service.dart';
@@ -11,7 +12,6 @@ import 'package:putra_jaya_billiard/services/firebase_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sliding_up_panel/sliding_up_panel.dart';
 
-// Import widget-widget baru
 import 'widgets/billiard_table_card.dart';
 import 'widgets/connection_panel.dart';
 import 'widgets/log_panel.dart';
@@ -31,7 +31,6 @@ class DashboardPage extends StatefulWidget {
 }
 
 class _DashboardPageState extends State<DashboardPage> {
-  // --- STATE AND SERVICES ---
   final ArduinoService _arduinoService = ArduinoService();
   final FirebaseService _firebaseService = FirebaseService();
   List<String> _availablePorts = [];
@@ -43,7 +42,6 @@ class _DashboardPageState extends State<DashboardPage> {
   double _ratePerMinute = 0.0;
   final ScrollController _logScrollController = ScrollController();
 
-  // --- LIFECYCLE & CORE LOGIC ---
   @override
   void initState() {
     super.initState();
@@ -60,36 +58,6 @@ class _DashboardPageState extends State<DashboardPage> {
     _logicTimer?.cancel();
     _logScrollController.dispose();
     super.dispose();
-  }
-
-  Future<void> _finalizeAndSaveBill(int mejaId) async {
-    final startTime = _activeSessions[mejaId];
-    if (startTime == null) return;
-    final endTime = DateTime.now();
-    final duration = endTime.difference(startTime);
-    final cost = _calculateCost(duration);
-
-    _addLog(
-        'Sesi Meja $mejaId selesai. Durasi: ${duration.inMinutes} menit. Biaya: Rp${cost.toStringAsFixed(0)}');
-
-    final transaction = BillingTransaction(
-      tableId: mejaId,
-      startTime: startTime,
-      endTime: endTime,
-      durationInSeconds: duration.inSeconds,
-      totalCost: cost,
-    );
-
-    try {
-      await _firebaseService.saveBillingTransaction(transaction, widget.user);
-      _addLog('Transaksi Meja $mejaId berhasil disimpan ke Firebase.');
-    } catch (e) {
-      _addLog('Error menyimpan ke Firebase: $e');
-    }
-
-    if (!mounted) return;
-    setState(() => _activeSessions.remove(mejaId));
-    _setRelayStateToOff(mejaId);
   }
 
   void _initRelayStates() {
@@ -119,6 +87,7 @@ class _DashboardPageState extends State<DashboardPage> {
           uiNeedsUpdate = true;
           final remaining =
               relay.timerEndTime!.difference(currentTime).inSeconds;
+
           if (remaining <= 0) {
             relay.remainingTimeSeconds = 0;
             relay.status = RelayStatus.timeUp;
@@ -134,26 +103,77 @@ class _DashboardPageState extends State<DashboardPage> {
           }
         }
       });
+
       if (newlyFinishedTimerIds.isNotEmpty) {
         for (final id in newlyFinishedTimerIds) {
           _addLog('Waktu Meja $id HABIS. Menunggu pembayaran.');
           _sendCommand(id, "0");
         }
       }
+
       if (uiNeedsUpdate) {
         setState(() {});
       }
     });
   }
 
-  // --- RELAY & SESSION CONTROL ---
   void _startBillingSession(int mejaId) {
     if (_activeSessions.containsKey(mejaId)) {
       _addLog('Info: Meja $mejaId sudah memiliki sesi aktif.');
       return;
     }
-    setState(() => _activeSessions[mejaId] = DateTime.now());
+    setState(() {
+      _activeSessions[mejaId] = DateTime.now();
+    });
     _addLog('Sesi billing Meja $mejaId dimulai.');
+  }
+
+  Future<void> _finalizeAndSaveBill(int mejaId,
+      {Member? member,
+      required double subtotal,
+      required double discount,
+      required double finalTotal}) async {
+    final startTime = _activeSessions[mejaId];
+    if (startTime == null) return;
+
+    // 1. Lakukan aksi instan terlebih dahulu
+    _setRelayStateToOff(mejaId);
+    if (mounted) {
+      setState(() => _activeSessions.remove(mejaId));
+    }
+
+    _addLog('Sesi Meja $mejaId selesai. Total: ${_formatCurrency(finalTotal)}');
+
+    // 2. Lakukan tugas latar belakang
+    final transaction = BillingTransaction(
+      tableId: mejaId,
+      startTime: startTime,
+      endTime: DateTime.now(),
+      durationInSeconds: DateTime.now().difference(startTime).inSeconds,
+      totalCost: subtotal,
+    );
+
+    try {
+      await _firebaseService.saveBillingTransaction(
+        transaction,
+        widget.user,
+        member: member,
+        subtotal: subtotal,
+        discount: discount,
+        finalTotal: finalTotal,
+      );
+      _addLog('Transaksi Meja $mejaId berhasil disimpan ke Firebase.');
+    } catch (e) {
+      _addLog('ERROR: Gagal menyimpan transaksi Meja $mejaId ke Firebase: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Gagal menyimpan transaksi ke server.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 
   void _turnOnRelay(int mejaId) {
@@ -195,12 +215,13 @@ class _DashboardPageState extends State<DashboardPage> {
   void _cancelSessionAndTurnOff(int mejaId) {
     if (_activeSessions.containsKey(mejaId)) {
       _addLog('Sesi Meja $mejaId DIBATALKAN tanpa transaksi.');
-      setState(() => _activeSessions.remove(mejaId));
+      setState(() {
+        _activeSessions.remove(mejaId);
+      });
     }
     _setRelayStateToOff(mejaId);
   }
 
-  // --- ARDUINO COMMUNICATION ---
   void _initPorts() {
     setState(() => _availablePorts = _arduinoService.getAvailablePorts());
   }
@@ -235,47 +256,101 @@ class _DashboardPageState extends State<DashboardPage> {
     }
   }
 
-  // --- DIALOGS ---
   Future<void> _showConfirmationDialog(int mejaId) async {
     final startTime = _activeSessions[mejaId];
     if (startTime == null) return;
-    final duration = DateTime.now().difference(startTime);
-    final finalCost = _calculateCost(duration);
+
+    Member? selectedMemberInDialog;
 
     return showDialog<void>(
-        context: context,
-        barrierDismissible: false,
-        builder: (BuildContext context) {
-          return AlertDialog(
-            backgroundColor: const Color(0xFF1E1E1E),
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-            title: Text('Konfirmasi Pembayaran Meja $mejaId'),
-            content: SingleChildScrollView(
-                child: ListBody(children: <Widget>[
-              Text('Durasi Main: ${_formatDuration(duration.inSeconds)}'),
-              const SizedBox(height: 12),
-              Text('Total Tagihan: ${_formatCurrency(finalCost)}',
-                  style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 18,
-                      color: Colors.cyanAccent)),
-            ])),
-            actions: <Widget>[
-              TextButton(
-                  child: const Text('Batal'),
-                  onPressed: () => Navigator.of(context).pop()),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.teal),
-                child: const Text('Konfirmasi & Bayar'),
-                onPressed: () {
-                  Navigator.of(context).pop();
-                  _finalizeAndSaveBill(mejaId);
-                },
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return StatefulBuilder(
+          builder: (context, setStateInDialog) {
+            final duration = DateTime.now().difference(startTime);
+            final subtotal = _calculateCost(duration);
+            final discountPercentage =
+                selectedMemberInDialog?.discountPercentage ?? 0;
+            final discountAmount = subtotal * (discountPercentage / 100);
+            final finalCost = subtotal - discountAmount;
+
+            return AlertDialog(
+              backgroundColor: const Color(0xFF1E1E1E),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16)),
+              title: Text('Konfirmasi Pembayaran Meja $mejaId'),
+              content: SingleChildScrollView(
+                child: ListBody(
+                  children: <Widget>[
+                    Text('Durasi Main: ${_formatDuration(duration.inSeconds)}'),
+                    const SizedBox(height: 12),
+                    _buildPriceRow('Subtotal:', subtotal),
+                    if (discountAmount > 0)
+                      _buildPriceRow(
+                          'Diskon ($discountPercentage%):', -discountAmount,
+                          color: Colors.amberAccent),
+                    const Divider(height: 12, color: Colors.white24),
+                    _buildPriceRow('Total Tagihan:', finalCost, isTotal: true),
+                    const Divider(height: 24, color: Colors.white24),
+                    StreamBuilder<List<Member>>(
+                      stream: _firebaseService.getMembersStream(),
+                      builder: (context, snapshot) {
+                        if (!snapshot.hasData) {
+                          return const Center(child: Text("Memuat member..."));
+                        }
+                        final members = snapshot.data!;
+                        List<DropdownMenuItem<Member?>> items = [
+                          const DropdownMenuItem<Member?>(
+                            value: null,
+                            child: Text('Pelanggan Umum'),
+                          ),
+                          ...members.where((m) => m.isActive).map((member) {
+                            return DropdownMenuItem<Member?>(
+                              value: member,
+                              child: Text(member.name),
+                            );
+                          }).toList(),
+                        ];
+                        return DropdownButton<Member?>(
+                          value: selectedMemberInDialog,
+                          hint: const Text('Pilih Member (Opsional)'),
+                          isExpanded: true,
+                          items: items,
+                          onChanged: (Member? newValue) {
+                            setStateInDialog(
+                                () => selectedMemberInDialog = newValue);
+                          },
+                        );
+                      },
+                    )
+                  ],
+                ),
               ),
-            ],
-          );
-        });
+              actions: <Widget>[
+                TextButton(
+                    child: const Text('Batal'),
+                    onPressed: () => Navigator.of(context).pop()),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.teal),
+                  child: const Text('Konfirmasi & Bayar'),
+                  onPressed: () {
+                    Navigator.of(context).pop();
+                    _finalizeAndSaveBill(
+                      mejaId,
+                      member: selectedMemberInDialog,
+                      subtotal: subtotal,
+                      discount: discountAmount,
+                      finalTotal: finalCost,
+                    );
+                  },
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
   }
 
   Future<void> _showSetTimerDialog(int mejaId) async {
@@ -286,57 +361,65 @@ class _DashboardPageState extends State<DashboardPage> {
     final hoursController = TextEditingController();
     final minutesController = TextEditingController();
     return showDialog<void>(
-        context: context,
-        builder: (BuildContext context) {
-          return AlertDialog(
-            backgroundColor: const Color(0xFF1E1E1E),
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-            title: Text('Atur Timer Meja $mejaId'),
-            content: Column(mainAxisSize: MainAxisSize.min, children: [
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF1E1E1E),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Text('Atur Timer Meja $mejaId'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
               TextField(
-                  controller: hoursController,
-                  keyboardType: TextInputType.number,
-                  autofocus: true,
-                  decoration: const InputDecoration(
-                      labelText: 'Jam',
-                      hintText: 'Contoh: 1',
-                      border: OutlineInputBorder())),
+                controller: hoursController,
+                keyboardType: TextInputType.number,
+                autofocus: true,
+                decoration: const InputDecoration(
+                  labelText: 'Jam',
+                  hintText: 'Contoh: 1',
+                  border: OutlineInputBorder(),
+                ),
+              ),
               const SizedBox(height: 16),
               TextField(
-                  controller: minutesController,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                      labelText: 'Menit',
-                      hintText: 'Contoh: 30',
-                      border: OutlineInputBorder())),
-            ]),
-            actions: <Widget>[
-              TextButton(
-                  child: const Text('Batal'),
-                  onPressed: () => Navigator.of(context).pop()),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.orangeAccent),
-                child: const Text('Atur Timer'),
-                onPressed: () {
-                  final hours = int.tryParse(hoursController.text) ?? 0;
-                  final minutes = int.tryParse(minutesController.text) ?? 0;
-                  final totalSeconds = (hours * 3600) + (minutes * 60);
-                  if (totalSeconds > 0) {
-                    _startTimer(mejaId, totalSeconds);
-                    Navigator.of(context).pop();
-                  } else {
-                    _addLog('Input durasi tidak valid.');
-                  }
-                },
+                controller: minutesController,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'Menit',
+                  hintText: 'Contoh: 30',
+                  border: OutlineInputBorder(),
+                ),
               ),
             ],
-          );
-        });
+          ),
+          actions: <Widget>[
+            TextButton(
+              child: const Text('Batal'),
+              onPressed: () => Navigator.of(context).pop(),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.orangeAccent),
+              child: const Text('Atur Timer'),
+              onPressed: () {
+                final hours = int.tryParse(hoursController.text) ?? 0;
+                final minutes = int.tryParse(minutesController.text) ?? 0;
+                final totalSeconds = (hours * 3600) + (minutes * 60);
+                if (totalSeconds > 0) {
+                  _startTimer(mejaId, totalSeconds);
+                  Navigator.of(context).pop();
+                } else {
+                  _addLog('Input durasi tidak valid.');
+                }
+              },
+            ),
+          ],
+        );
+      },
+    );
   }
 
-  // --- UTILITY & HELPER FUNCTIONS ---
   void _addLog(String message) {
     if (!mounted) return;
     setState(() {
@@ -371,13 +454,30 @@ class _DashboardPageState extends State<DashboardPage> {
         (duration.inMinutes.remainder(60) * _ratePerMinute);
   }
 
-  // --- BUILD METHOD ---
+  Widget _buildPriceRow(String label, double amount,
+      {bool isTotal = false, Color? color}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2.0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: TextStyle(fontSize: isTotal ? 16 : 14)),
+          Text(_formatCurrency(amount),
+              style: TextStyle(
+                  fontSize: isTotal ? 18 : 14,
+                  fontWeight: FontWeight.bold,
+                  color:
+                      color ?? (isTotal ? Colors.cyanAccent : Colors.white))),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final screenHeight = MediaQuery.of(context).size.height;
     final double panelMinHeight = screenHeight * 0.1;
 
-    // Instance untuk LogPanel
     final logPanel = LogPanel(
       logMessages: _logMessages,
       logScrollController: _logScrollController,
@@ -394,7 +494,6 @@ class _DashboardPageState extends State<DashboardPage> {
         bottom: false,
         child: Column(
           children: [
-            // Menggunakan widget ConnectionPanel
             ConnectionPanel(
               arduinoService: _arduinoService,
               availablePorts: _availablePorts,
@@ -414,7 +513,6 @@ class _DashboardPageState extends State<DashboardPage> {
                 itemCount: numRelays,
                 itemBuilder: (context, index) {
                   final mejaId = index + 1;
-                  // Menggunakan widget BilliardTableCard
                   return BilliardTableCard(
                     tableId: mejaId,
                     relay: _relayStates[mejaId]!,

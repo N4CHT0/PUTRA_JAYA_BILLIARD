@@ -3,6 +3,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:putra_jaya_billiard/models/billing_transaction.dart';
 import 'package:putra_jaya_billiard/models/cart_item_model.dart';
+import 'package:putra_jaya_billiard/models/member_model.dart';
 import 'package:putra_jaya_billiard/models/product_model.dart';
 import 'package:putra_jaya_billiard/models/purchase_item_model.dart';
 import 'package:putra_jaya_billiard/models/stock_adjustment_model.dart';
@@ -16,37 +17,45 @@ class FirebaseService {
 
   // --- Financial Transaction Methods ---
 
-  // Metode ini tidak perlu diubah karena tidak menggunakan batch/transaction
   Future<void> saveBillingTransaction(
-      BillingTransaction transaction, UserModel cashier) async {
+      BillingTransaction transaction, UserModel cashier,
+      {Member? member,
+      required double subtotal,
+      required double discount,
+      required double finalTotal}) async {
     final transactionData = transaction.toMap();
     transactionData['flow'] = 'income';
     transactionData['type'] = 'billiard';
     transactionData['createdAt'] = transaction.startTime;
-    transactionData['totalAmount'] = transaction.totalCost;
+    transactionData['subtotal'] = subtotal;
+    transactionData['discount'] = discount;
+    transactionData['totalAmount'] = finalTotal;
     transactionData['cashierId'] = cashier.uid;
     transactionData['cashierName'] = cashier.nama;
+    if (member != null) {
+      transactionData['memberId'] = member.id;
+      transactionData['memberName'] = member.name;
+    }
     await _db.collection(_financialTransactionsCollection).add(transactionData);
   }
 
-  // --- FUNGSI DIPERBARUI: Menggunakan WriteBatch untuk stabilitas ---
   Future<void> saveSalesTransactionAndDecreaseStock(
-      List<CartItem> cartItems, UserModel cashier) async {
+      List<CartItem> cartItems, UserModel cashier,
+      {Member? member,
+      required double subtotal,
+      required double discount,
+      required double finalTotal}) async {
     if (cartItems.isEmpty) return;
 
     final WriteBatch batch = _db.batch();
     final salesDocRef = _db.collection(_financialTransactionsCollection).doc();
-    double totalAmount = 0;
-    List<Map<String, dynamic>> itemsForTransaction = [];
 
     for (var item in cartItems) {
       final productDocRef = _db.collection('products').doc(item.product.id!);
 
-      // 1. Siapkan perintah untuk mengurangi stok
       batch.update(
           productDocRef, {'stock': FieldValue.increment(-item.quantity)});
 
-      // 2. Siapkan catatan mutasi
       final mutation = StockMutation(
         productId: item.product.id!,
         productName: item.product.name,
@@ -60,34 +69,35 @@ class FirebaseService {
       );
       final mutationDocRef = _db.collection('stock_mutations').doc();
       batch.set(mutationDocRef, mutation.toMap());
-
-      // 3. Kumpulkan data untuk catatan keuangan
-      totalAmount += item.product.sellingPrice * item.quantity;
-      itemsForTransaction.add({
-        'productId': item.product.id,
-        'productName': item.product.name,
-        'quantity': item.quantity,
-        'price': item.product.sellingPrice,
-      });
     }
 
-    // 4. Siapkan catatan transaksi keuangan
-    final financialTransactionData = {
+    final Map<String, dynamic> financialTransactionData = {
       'flow': 'income',
       'type': 'pos',
-      'items': itemsForTransaction,
-      'totalAmount': totalAmount,
+      'items': cartItems
+          .map((item) => {
+                'productId': item.product.id,
+                'productName': item.product.name,
+                'quantity': item.quantity,
+                'price': item.product.sellingPrice,
+              })
+          .toList(),
+      'subtotal': subtotal,
+      'discount': discount,
+      'totalAmount': finalTotal,
       'cashierId': cashier.uid,
       'cashierName': cashier.nama,
       'createdAt': DateTime.now(),
     };
+    if (member != null) {
+      financialTransactionData['memberId'] = member.id;
+      financialTransactionData['memberName'] = member.name;
+    }
     batch.set(salesDocRef, financialTransactionData);
 
-    // 5. Jalankan semua operasi sekaligus
     await batch.commit();
   }
 
-  // --- FUNGSI DIPERBARUI: Menggunakan WriteBatch untuk stabilitas ---
   Future<void> savePurchaseAndUpdateStock(List<PurchaseItem> purchaseItems,
       Supplier supplier, UserModel user) async {
     if (purchaseItems.isEmpty) return;
@@ -96,7 +106,6 @@ class FirebaseService {
     final purchaseDocRef =
         _db.collection(_financialTransactionsCollection).doc();
     double totalAmount = 0;
-    List<Map<String, dynamic>> itemsForTransaction = [];
 
     for (var item in purchaseItems) {
       final productDocRef = _db.collection('products').doc(item.product.id!);
@@ -121,20 +130,21 @@ class FirebaseService {
       batch.set(mutationDocRef, mutation.toMap());
 
       totalAmount += item.purchasePrice * item.quantity;
-      itemsForTransaction.add({
-        'productId': item.product.id,
-        'productName': item.product.name,
-        'quantity': item.quantity,
-        'purchasePrice': item.purchasePrice,
-      });
     }
 
-    final financialTransactionData = {
+    final Map<String, dynamic> financialTransactionData = {
       'flow': 'expense',
       'type': 'purchase',
       'supplierId': supplier.id,
       'supplierName': supplier.name,
-      'items': itemsForTransaction,
+      'items': purchaseItems
+          .map((item) => {
+                'productId': item.product.id,
+                'productName': item.product.name,
+                'quantity': item.quantity,
+                'purchasePrice': item.purchasePrice,
+              })
+          .toList(),
       'totalAmount': totalAmount,
       'userId': user.uid,
       'userName': user.nama,
@@ -145,7 +155,6 @@ class FirebaseService {
     await batch.commit();
   }
 
-  // --- FUNGSI DIPERBARUI: Menggunakan WriteBatch untuk stabilitas ---
   Future<void> performStockAdjustment(
       List<StockAdjustment> adjustments, UserModel user) async {
     if (adjustments.isEmpty) return;
@@ -174,7 +183,7 @@ class FirebaseService {
     await batch.commit();
   }
 
-  // --- Read Methods (Tidak Berubah) ---
+  // --- Read Methods ---
   Stream<QuerySnapshot> getFinancialTransactionsStream() {
     return _db
         .collection(_financialTransactionsCollection)
@@ -206,7 +215,7 @@ class FirebaseService {
             .toList());
   }
 
-  // --- Product Methods (Tidak Berubah) ---
+  // --- Product Methods ---
   Stream<List<Product>> getProductsStream() {
     return _db.collection('products').orderBy('name').snapshots().map(
         (snapshot) =>
@@ -226,7 +235,7 @@ class FirebaseService {
     await _db.collection('products').doc(productId).delete();
   }
 
-  // --- Supplier Methods (Tidak Berubah) ---
+  // --- Supplier Methods ---
   Stream<List<Supplier>> getSuppliersStream() {
     return _db.collection('suppliers').orderBy('name').snapshots().map(
         (snapshot) =>
@@ -244,5 +253,25 @@ class FirebaseService {
 
   Future<void> deleteSupplier(String supplierId) async {
     await _db.collection('suppliers').doc(supplierId).delete();
+  }
+
+  // --- Member Methods ---
+  Stream<List<Member>> getMembersStream() {
+    return _db.collection('members').orderBy('name').snapshots().map(
+        (snapshot) =>
+            snapshot.docs.map((doc) => Member.fromFirestore(doc)).toList());
+  }
+
+  Future<void> addMember(Member member) async {
+    await _db.collection('members').add(member.toMap());
+  }
+
+  Future<void> updateMember(Member member) async {
+    if (member.id == null) return;
+    await _db.collection('members').doc(member.id).update(member.toMap());
+  }
+
+  Future<void> deleteMember(String memberId) async {
+    await _db.collection('members').doc(memberId).delete();
   }
 }

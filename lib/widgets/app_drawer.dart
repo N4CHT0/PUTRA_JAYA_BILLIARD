@@ -1,5 +1,3 @@
-// lib/widgets/app_drawer.dart
-
 import 'package:flutter/material.dart';
 import 'package:putra_jaya_billiard/models/user_model.dart';
 
@@ -94,6 +92,11 @@ class AppDrawer extends StatelessWidget {
                 leading: const Icon(Icons.groups_rounded),
                 title: const Text('Manajemen Supplier'),
                 onTap: () => handleNavigation(7),
+              ),
+              ListTile(
+                leading: const Icon(Icons.card_membership_rounded),
+                title: const Text('Manajemen Member'),
+                onTap: () => handleNavigation(12),
               ),
               ListTile(
                 leading: const Icon(Icons.rule_folder_rounded),

@@ -54,6 +54,8 @@ class TransactionDetailDialog extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         _buildDetailRow('Jenis', 'Billing Meja'),
+        if (transactionData.containsKey('memberName'))
+          _buildDetailRow('Pelanggan', transactionData['memberName']),
         _buildDetailRow('Meja', '${transactionData['tableId']}'),
         _buildDetailRow('Kasir', transactionData['cashierName'] ?? 'N/A'),
         _buildDetailRow('Waktu Mulai',
@@ -77,6 +79,8 @@ class TransactionDetailDialog extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         _buildDetailRow('Jenis', 'Penjualan POS'),
+        if (transactionData.containsKey('memberName'))
+          _buildDetailRow('Pelanggan', transactionData['memberName']),
         _buildDetailRow('Kasir', transactionData['cashierName'] ?? 'N/A'),
         _buildDetailRow(
             'Waktu',
@@ -109,7 +113,6 @@ class TransactionDetailDialog extends StatelessWidget {
       children: [
         _buildDetailRow('Jenis', 'Pembelian Stok'),
         _buildDetailRow('Supplier', transactionData['supplierName'] ?? 'N/A'),
-        // <-- POIN PENTING 3: Nama pengguna ditampilkan di sini
         _buildDetailRow('Dicatat oleh', transactionData['userName'] ?? 'N/A'),
         _buildDetailRow(
             'Waktu',

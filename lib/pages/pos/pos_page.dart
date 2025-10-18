@@ -1,12 +1,12 @@
+// lib/pages/pos/pos_page.dart
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:putra_jaya_billiard/models/cart_item_model.dart';
+import 'package:putra_jaya_billiard/models/member_model.dart';
 import 'package:putra_jaya_billiard/models/product_model.dart';
 import 'package:putra_jaya_billiard/models/user_model.dart';
 import 'package:putra_jaya_billiard/services/firebase_service.dart';
-// Note: Anda mungkin perlu membuat cara untuk mendapatkan user yang sedang login.
-// Untuk sekarang, kita akan asumsikan user didapat dari widget tree (misal: via Provider)
-// atau dilempar sebagai argumen. Di sini kita akan lempar sebagai argumen.
 
 class PosPage extends StatefulWidget {
   final UserModel currentUser;
@@ -19,38 +19,64 @@ class PosPage extends StatefulWidget {
 class _PosPageState extends State<PosPage> {
   final FirebaseService _firebaseService = FirebaseService();
   final List<CartItem> _cart = [];
+  Member? _selectedMember;
+
   final NumberFormat _currencyFormat =
       NumberFormat.currency(locale: 'id_ID', symbol: 'Rp ', decimalDigits: 0);
 
   void _addToCart(Product product) {
     setState(() {
-      // Cek apakah produk sudah ada di keranjang
       for (var item in _cart) {
         if (item.product.id == product.id) {
-          item.quantity++;
+          if (item.quantity < product.stock) {
+            item.quantity++;
+          } else {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Stok ${product.name} tidak mencukupi.')),
+            );
+          }
           return;
         }
       }
-      // Jika belum ada, tambahkan baru
-      _cart.add(CartItem(product: product));
+      if (product.stock > 0) {
+        _cart.add(CartItem(product: product));
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Stok ${product.name} habis.')),
+        );
+      }
     });
   }
 
   void _updateQuantity(CartItem item, int change) {
     setState(() {
-      item.quantity += change;
-      if (item.quantity <= 0) {
+      final newQuantity = item.quantity + change;
+      if (newQuantity <= 0) {
         _cart.remove(item);
+      } else if (newQuantity <= item.product.stock) {
+        item.quantity = newQuantity;
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Stok ${item.product.name} tidak mencukupi.')),
+        );
       }
     });
   }
 
-  double get _totalPrice {
-    double total = 0;
-    for (var item in _cart) {
-      total += item.product.sellingPrice * item.quantity;
+  double get _subtotal {
+    return _cart.fold(
+        0, (sum, item) => sum + (item.product.sellingPrice * item.quantity));
+  }
+
+  double get _discountAmount {
+    if (_selectedMember == null || _selectedMember!.discountPercentage == 0) {
+      return 0;
     }
-    return total;
+    return _subtotal * (_selectedMember!.discountPercentage / 100);
+  }
+
+  double get _totalPrice {
+    return _subtotal - _discountAmount;
   }
 
   void _checkout() async {
@@ -63,18 +89,34 @@ class _PosPageState extends State<PosPage> {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF2c2c2c),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         title: const Text('Konfirmasi Transaksi'),
-        content: Text(
-            'Total belanja: ${_currencyFormat.format(_totalPrice)}\nLanjutkan pembayaran?'),
+        content: Text('Subtotal: ${_currencyFormat.format(_subtotal)}\n'
+            'Diskon: - ${_currencyFormat.format(_discountAmount)}\n'
+            'Total: ${_currencyFormat.format(_totalPrice)}\n\n'
+            'Atas nama: ${_selectedMember?.name ?? "Pelanggan Umum"}\nLanjutkan pembayaran?'),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx), child: const Text('Batal')),
           ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.teal),
             onPressed: () async {
               try {
+                // --- PERBAIKAN DI SINI ---
+                // Mengirim semua parameter yang dibutuhkan
                 await _firebaseService.saveSalesTransactionAndDecreaseStock(
-                    _cart, widget.currentUser);
-                setState(() => _cart.clear());
+                  _cart,
+                  widget.currentUser,
+                  member: _selectedMember,
+                  subtotal: _subtotal,
+                  discount: _discountAmount,
+                  finalTotal: _totalPrice,
+                );
+                setState(() {
+                  _cart.clear();
+                  _selectedMember = null;
+                });
                 Navigator.pop(ctx);
                 ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
                   content: Text('Transaksi berhasil!'),
@@ -104,17 +146,9 @@ class _PosPageState extends State<PosPage> {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Kolom Kiri: Daftar Produk
-            Expanded(
-              flex: 2,
-              child: _buildProductList(),
-            ),
+            Expanded(flex: 2, child: _buildProductList()),
             const SizedBox(width: 16),
-            // Kolom Kanan: Keranjang Belanja
-            Expanded(
-              flex: 1,
-              child: _buildCart(),
-            ),
+            Expanded(flex: 1, child: _buildCartSide()),
           ],
         ),
       ),
@@ -141,7 +175,7 @@ class _PosPageState extends State<PosPage> {
             padding: const EdgeInsets.all(8),
             gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
               maxCrossAxisExtent: 180,
-              childAspectRatio: 3 / 2.5,
+              childAspectRatio: 3 / 2.8,
               crossAxisSpacing: 8,
               mainAxisSpacing: 8,
             ),
@@ -150,6 +184,7 @@ class _PosPageState extends State<PosPage> {
               final product = products[index];
               return InkWell(
                 onTap: () => _addToCart(product),
+                borderRadius: BorderRadius.circular(8),
                 child: Card(
                   color: const Color(0xFF2c2c2c),
                   child: Padding(
@@ -158,18 +193,77 @@ class _PosPageState extends State<PosPage> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text(
-                          product.name,
-                          style: const TextStyle(fontWeight: FontWeight.bold),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
+                        Text(product.name,
+                            style: const TextStyle(fontWeight: FontWeight.bold),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text("Stok: ${product.stock}",
+                                style: TextStyle(
+                                    color: Colors.grey[400], fontSize: 12)),
+                            Text(_currencyFormat.format(product.sellingPrice),
+                                style:
+                                    const TextStyle(color: Colors.cyanAccent)),
+                          ],
                         ),
-                        Text(_currencyFormat.format(product.sellingPrice)),
                       ],
                     ),
                   ),
                 ),
               );
+            },
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildCartSide() {
+    return Column(
+      children: [
+        _buildMemberSelector(),
+        const SizedBox(height: 16),
+        Expanded(child: _buildCart()),
+      ],
+    );
+  }
+
+  Widget _buildMemberSelector() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E1E1E).withOpacity(0.5),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: StreamBuilder<List<Member>>(
+        stream: _firebaseService.getMembersStream(),
+        builder: (context, snapshot) {
+          if (!snapshot.hasData)
+            return const Center(child: Text('Memuat member...'));
+          final members = snapshot.data!;
+          List<DropdownMenuItem<Member?>> items = [
+            const DropdownMenuItem<Member?>(
+              value: null,
+              child: Text('Pelanggan Umum'),
+            ),
+            ...members.where((m) => m.isActive).map((member) {
+              return DropdownMenuItem<Member?>(
+                value: member,
+                child: Text(member.name),
+              );
+            }).toList(),
+          ];
+
+          return DropdownButton<Member?>(
+            value: _selectedMember,
+            hint: const Text('Pilih Member (Opsional)'),
+            isExpanded: true,
+            underline: const SizedBox.shrink(),
+            items: items,
+            onChanged: (Member? newValue) {
+              setState(() => _selectedMember = newValue);
             },
           );
         },
@@ -224,18 +318,13 @@ class _PosPageState extends State<PosPage> {
                   ),
           ),
           const Divider(height: 24),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text('Total:',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-              Text(_currencyFormat.format(_totalPrice),
-                  style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.cyanAccent)),
-            ],
-          ),
+          _buildPriceRow('Subtotal:', _subtotal),
+          if (_discountAmount > 0)
+            _buildPriceRow('Diskon (${_selectedMember!.discountPercentage}%):',
+                -_discountAmount,
+                color: Colors.amberAccent),
+          const Divider(),
+          _buildPriceRow('Total:', _totalPrice, isTotal: true),
           const SizedBox(height: 16),
           SizedBox(
             width: double.infinity,
@@ -250,6 +339,28 @@ class _PosPageState extends State<PosPage> {
               ),
             ),
           )
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPriceRow(String label, double amount,
+      {bool isTotal = false, Color? color}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2.0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label,
+              style: TextStyle(
+                  fontSize: isTotal ? 18 : 14,
+                  fontWeight: isTotal ? FontWeight.bold : FontWeight.normal)),
+          Text(_currencyFormat.format(amount),
+              style: TextStyle(
+                  fontSize: isTotal ? 18 : 14,
+                  fontWeight: isTotal ? FontWeight.bold : FontWeight.normal,
+                  color:
+                      color ?? (isTotal ? Colors.cyanAccent : Colors.white))),
         ],
       ),
     );

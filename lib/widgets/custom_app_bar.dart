@@ -1,7 +1,9 @@
+// lib/widgets/custom_app_bar.dart
+
 import 'package:flutter/material.dart';
 import 'package:putra_jaya_billiard/models/user_model.dart';
 import 'package:putra_jaya_billiard/services/auth_service.dart';
-import 'package:window_manager/window_manager.dart';
+import 'package:putra_jaya_billiard/widgets/change_password_dialog.dart';
 
 class CustomAppBar extends StatelessWidget implements PreferredSizeWidget {
   final UserModel user;
@@ -22,7 +24,6 @@ class CustomAppBar extends StatelessWidget implements PreferredSizeWidget {
   @override
   Widget build(BuildContext context) {
     final authService = AuthService();
-    final userRole = user.role;
 
     return AppBar(
       backgroundColor: Colors.transparent,
@@ -34,23 +35,33 @@ class CustomAppBar extends StatelessWidget implements PreferredSizeWidget {
             user.nama,
             style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
           ),
-          const SizedBox(height: 2),
           Text(
-            '${user.email} (${userRole.toUpperCase()})',
+            '${user.email} (${user.role.toUpperCase()})',
             style: const TextStyle(fontSize: 12, color: Colors.white70),
           ),
         ],
       ),
       actions: [
         IconButton(
-          icon: const Icon(Icons.point_of_sale),
-          tooltip: 'Sistem POS',
-          onPressed: onGoToPOS,
+          icon: const Icon(Icons.fullscreen),
+          tooltip: 'Toggle Fullscreen',
+          onPressed: onToggleFullscreen,
         ),
         IconButton(
-          icon: const Icon(Icons.casino),
-          tooltip: 'Biliard Billing',
+          icon: const Icon(Icons.home),
+          tooltip: 'Dashboard',
           onPressed: onGoHome,
+        ),
+        // --- TOMBOL BARU ---
+        IconButton(
+          icon: const Icon(Icons.key),
+          tooltip: 'Ganti Password',
+          onPressed: () {
+            showDialog(
+              context: context,
+              builder: (context) => const ChangePasswordDialog(),
+            );
+          },
         ),
         IconButton(
           icon: const Icon(Icons.logout),
@@ -61,7 +72,6 @@ class CustomAppBar extends StatelessWidget implements PreferredSizeWidget {
     );
   }
 
-  // Tentukan tinggi AppBar
   @override
   Size get preferredSize => const Size.fromHeight(kToolbarHeight);
 }
