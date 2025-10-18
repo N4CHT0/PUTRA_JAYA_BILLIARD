@@ -477,7 +477,7 @@ class _DashboardPageState extends State<DashboardPage> {
         elevation: 0,
         actions: [
           Tooltip(
-            key: const ValueKey('connection_tooltip'), // <-- TAMBAHKAN INI
+            key: const ValueKey('connection_tooltip'),
             message: isConnected
                 ? 'Terhubung'
                 : 'Tidak Terhubung - Klik untuk mengatur',
