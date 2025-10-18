@@ -114,6 +114,7 @@ class BilliardTableCard extends StatelessWidget {
   Widget _buildControlButton(
       IconData icon, String tooltip, VoidCallback onPressed) {
     return Tooltip(
+      key: ValueKey('table_$tableId' '_$tooltip'),
       message: tooltip,
       child: InkWell(
         onTap: onPressed,

@@ -43,13 +43,13 @@ class CustomAppBar extends StatelessWidget implements PreferredSizeWidget {
       ),
       actions: [
         IconButton(
-          icon: const Icon(Icons.fullscreen),
-          tooltip: 'Toggle Fullscreen',
-          onPressed: onToggleFullscreen,
+          icon: const Icon(Icons.point_of_sale),
+          tooltip: 'POS',
+          onPressed: onGoToPOS,
         ),
         IconButton(
-          icon: const Icon(Icons.home),
-          tooltip: 'Dashboard',
+          icon: const Icon(Icons.casino),
+          tooltip: 'billiard',
           onPressed: onGoHome,
         ),
         // --- TOMBOL BARU ---

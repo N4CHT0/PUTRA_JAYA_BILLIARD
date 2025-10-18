@@ -104,9 +104,14 @@ class AppDrawer extends StatelessWidget {
                 onTap: () => handleNavigation(10),
               ),
               ListTile(
-                leading: const Icon(Icons.settings_rounded),
-                title: const Text('Pengaturan'),
+                leading: const Icon(Icons.price_change_rounded),
+                title: const Text('Price Settings'),
                 onTap: () => handleNavigation(4),
+              ),
+              ListTile(
+                leading: const Icon(Icons.settings_rounded),
+                title: const Text('General Settings'),
+                onTap: () => handleNavigation(13),
               ),
             ],
           ],

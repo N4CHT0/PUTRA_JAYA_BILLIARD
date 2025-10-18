@@ -149,7 +149,6 @@ class _ReportsPageState extends State<ReportsPage>
             'Bulanan - ${intl.DateFormat('MMMM yyyy').format(_selectedDate)}';
         break;
       case ReportType.shift:
-      default:
         return const Center(child: Text("Invalid Report Type"));
     }
     // --- PERBAIKAN: Bungkus dengan SingleChildScrollView agar bisa scroll jika konten panjang ---

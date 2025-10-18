@@ -2,15 +2,30 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:putra_jaya_billiard/models/user_model.dart';
-// import 'package:putra_jaya_billiard/pages/dashboard/dashboard_page.dart';
 import 'package:putra_jaya_billiard/pages/login_page.dart';
 import 'package:putra_jaya_billiard/pages/main_layouts.dart';
+import 'package:putra_jaya_billiard/services/arduino_service.dart'; // Import service
 import 'package:putra_jaya_billiard/services/auth_service.dart';
-// Import untuk fitur fullscreen
 import 'package:window_manager/window_manager.dart';
 
-class AuthWrapper extends StatelessWidget {
+// DIUBAH MENJADI STATEFULWIDGET
+class AuthWrapper extends StatefulWidget {
   const AuthWrapper({super.key});
+
+  @override
+  State<AuthWrapper> createState() => _AuthWrapperState();
+}
+
+class _AuthWrapperState extends State<AuthWrapper> {
+  // 1. Buat instance ArduinoService di sini, HANYA SATU KALI.
+  final ArduinoService _arduinoService = ArduinoService();
+
+  @override
+  void dispose() {
+    // 2. Pastikan service di-dispose dengan benar saat aplikasi ditutup.
+    _arduinoService.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -24,10 +39,12 @@ class AuthWrapper extends StatelessWidget {
         }
 
         if (snapshot.hasData) {
-          // Jika user terdeteksi, lanjutkan ke RoleDispatcher
-          return RoleDispatcher(user: snapshot.data!);
+          // 3. Teruskan instance service ke RoleDispatcher
+          return RoleDispatcher(
+            user: snapshot.data!,
+            arduinoService: _arduinoService,
+          );
         } else {
-          // Jika tidak ada user, tampilkan halaman login
           return const LoginPage();
         }
       },
@@ -37,7 +54,13 @@ class AuthWrapper extends StatelessWidget {
 
 class RoleDispatcher extends StatelessWidget {
   final User user;
-  const RoleDispatcher({super.key, required this.user});
+  final ArduinoService arduinoService; // 4. Terima service di sini
+
+  const RoleDispatcher({
+    super.key,
+    required this.user,
+    required this.arduinoService, // 5. Jadikan parameter wajib
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -52,21 +75,19 @@ class RoleDispatcher extends StatelessWidget {
         }
 
         if (snapshot.hasData && snapshot.data!.exists) {
-          // --- LOGIKA FULLSCREEN DITEMPATKAN DI SINI ---
-          // Panggil perintah fullscreen setelah UI siap dibangun
           WidgetsBinding.instance.addPostFrameCallback((_) {
             windowManager.setFullScreen(true);
           });
-          // --- SELESAI ---
 
-          // Menggunakan factory constructor dari UserModel untuk kode yang lebih bersih
           final userModel = UserModel.fromFirestore(snapshot.data!);
 
-          return MainLayout(user: userModel);
+          // 6. Teruskan service ke MainLayout, error sekarang teratasi!
+          return MainLayout(
+            user: userModel,
+            arduinoService: arduinoService,
+          );
         }
 
-        // Jika data user di Firestore tidak ada (misal dihapus), paksa logout
-        // Ini adalah fallback yang aman
         AuthService().signOut();
         return const LoginPage();
       },

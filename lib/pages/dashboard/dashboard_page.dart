@@ -7,23 +7,25 @@ import 'package:putra_jaya_billiard/models/billing_transaction.dart';
 import 'package:putra_jaya_billiard/models/member_model.dart';
 import 'package:putra_jaya_billiard/models/relay_data.dart';
 import 'package:putra_jaya_billiard/models/user_model.dart';
+import 'package:putra_jaya_billiard/pages/connection/connection_page.dart';
 import 'package:putra_jaya_billiard/services/arduino_service.dart';
 import 'package:putra_jaya_billiard/services/firebase_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sliding_up_panel/sliding_up_panel.dart';
 
 import 'widgets/billiard_table_card.dart';
-import 'widgets/connection_panel.dart';
 import 'widgets/log_panel.dart';
 
 const int numRelays = 32;
 
 class DashboardPage extends StatefulWidget {
   final UserModel user;
+  final ArduinoService arduinoService;
 
   const DashboardPage({
     super.key,
     required this.user,
+    required this.arduinoService,
   });
 
   @override
@@ -31,9 +33,7 @@ class DashboardPage extends StatefulWidget {
 }
 
 class _DashboardPageState extends State<DashboardPage> {
-  final ArduinoService _arduinoService = ArduinoService();
   final FirebaseService _firebaseService = FirebaseService();
-  List<String> _availablePorts = [];
   final Map<int, RelayData> _relayStates = {};
   final Map<int, DateTime> _activeSessions = {};
   Timer? _logicTimer;
@@ -46,15 +46,17 @@ class _DashboardPageState extends State<DashboardPage> {
   void initState() {
     super.initState();
     _initRelayStates();
-    _initPorts();
     _startLogicTimer();
     _loadRates();
-    _arduinoService.onDataReceived = (data) => _addLog('Arduino: $data');
+    widget.arduinoService.onDataReceived = (data) => _addLog('Arduino: $data');
+    widget.arduinoService.onConnectionChanged = () {
+      if (mounted) setState(() {});
+    };
   }
 
   @override
   void dispose() {
-    _arduinoService.dispose();
+    widget.arduinoService.onConnectionChanged = null;
     _logicTimer?.cancel();
     _logScrollController.dispose();
     super.dispose();
@@ -136,7 +138,6 @@ class _DashboardPageState extends State<DashboardPage> {
     final startTime = _activeSessions[mejaId];
     if (startTime == null) return;
 
-    // 1. Lakukan aksi instan terlebih dahulu
     _setRelayStateToOff(mejaId);
     if (mounted) {
       setState(() => _activeSessions.remove(mejaId));
@@ -144,7 +145,6 @@ class _DashboardPageState extends State<DashboardPage> {
 
     _addLog('Sesi Meja $mejaId selesai. Total: ${_formatCurrency(finalTotal)}');
 
-    // 2. Lakukan tugas latar belakang
     final transaction = BillingTransaction(
       tableId: mejaId,
       startTime: startTime,
@@ -173,6 +173,13 @@ class _DashboardPageState extends State<DashboardPage> {
           ),
         );
       }
+    }
+  }
+
+  Future<void> _sendCommand(int mejaId, String action) async {
+    final success = await widget.arduinoService.sendCommand(mejaId, action);
+    if (!success) {
+      _addLog('Error: Gagal mengirim perintah ke Arduino (tidak terkoneksi).');
     }
   }
 
@@ -220,40 +227,6 @@ class _DashboardPageState extends State<DashboardPage> {
       });
     }
     _setRelayStateToOff(mejaId);
-  }
-
-  void _initPorts() {
-    setState(() => _availablePorts = _arduinoService.getAvailablePorts());
-  }
-
-  Future<void> _connectSerialPort(String portName) async {
-    await _arduinoService.connect(
-      portName,
-      onConnected: () {
-        if (!mounted) return;
-        setState(() {});
-        _addLog('Berhasil terhubung ke $portName');
-      },
-      onError: (error) {
-        if (!mounted) return;
-        setState(() {});
-        _addLog(error);
-      },
-    );
-  }
-
-  Future<void> _disconnectSerialPort() async {
-    await _arduinoService.disconnect();
-    if (!mounted) return;
-    setState(() {});
-    _addLog('Koneksi terputus.');
-  }
-
-  Future<void> _sendCommand(int mejaId, String action) async {
-    final success = await _arduinoService.sendCommand(mejaId, action);
-    if (!success) {
-      _addLog('Error: Gagal mengirim perintah ke Arduino (tidak terkoneksi).');
-    }
   }
 
   Future<void> _showConfirmationDialog(int mejaId) async {
@@ -473,6 +446,17 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
+  void _navigateToConnectionPage() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ConnectionPage(
+          arduinoService: widget.arduinoService,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final screenHeight = MediaQuery.of(context).size.height;
@@ -484,48 +468,66 @@ class _DashboardPageState extends State<DashboardPage> {
       onClearLog: () => setState(() => _logMessages = ''),
     );
 
-    return SlidingUpPanel(
-      panel: logPanel.buildPanel(),
-      collapsed: logPanel.buildCollapsed(),
-      minHeight: panelMinHeight,
-      maxHeight: screenHeight * 0.6,
-      color: Colors.transparent,
-      body: SafeArea(
-        bottom: false,
-        child: Column(
-          children: [
-            ConnectionPanel(
-              arduinoService: _arduinoService,
-              availablePorts: _availablePorts,
-              onRefreshPorts: _initPorts,
-              onConnectPort: _connectSerialPort,
-              onDisconnectPort: _disconnectSerialPort,
-            ),
-            Expanded(
-              child: GridView.builder(
-                padding: EdgeInsets.fromLTRB(16, 16, 16, panelMinHeight + 16),
-                gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                  maxCrossAxisExtent: 380,
-                  childAspectRatio: 1.7,
-                  crossAxisSpacing: 16,
-                  mainAxisSpacing: 16,
-                ),
-                itemCount: numRelays,
-                itemBuilder: (context, index) {
-                  final mejaId = index + 1;
-                  return BilliardTableCard(
-                    tableId: mejaId,
-                    relay: _relayStates[mejaId]!,
-                    isSessionActive: _activeSessions.containsKey(mejaId),
-                    onShowConfirmation: () => _showConfirmationDialog(mejaId),
-                    onCancelSession: () => _cancelSessionAndTurnOff(mejaId),
-                    onTurnOnRelay: () => _turnOnRelay(mejaId),
-                    onShowSetTimer: () => _showSetTimerDialog(mejaId),
-                  );
-                },
+    final bool isConnected = widget.arduinoService.isConnected;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Putra Jaya Billiard - Dashboard'),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        actions: [
+          Tooltip(
+            key: const ValueKey('connection_tooltip'), // <-- TAMBAHKAN INI
+            message: isConnected
+                ? 'Terhubung'
+                : 'Tidak Terhubung - Klik untuk mengatur',
+            child: IconButton(
+              icon: Icon(
+                Icons.usb,
+                color: isConnected ? Colors.greenAccent : Colors.redAccent,
               ),
+              onPressed: _navigateToConnectionPage,
             ),
-          ],
+          ),
+          const SizedBox(width: 8),
+        ],
+      ),
+      body: SlidingUpPanel(
+        panel: logPanel.buildPanel(),
+        collapsed: logPanel.buildCollapsed(),
+        minHeight: panelMinHeight,
+        maxHeight: screenHeight * 0.6,
+        color: Colors.transparent,
+        body: SafeArea(
+          bottom: false,
+          child: Column(
+            children: [
+              Expanded(
+                child: GridView.builder(
+                  padding: EdgeInsets.fromLTRB(16, 16, 16, panelMinHeight + 16),
+                  gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                    maxCrossAxisExtent: 380,
+                    childAspectRatio: 1.7,
+                    crossAxisSpacing: 16,
+                    mainAxisSpacing: 16,
+                  ),
+                  itemCount: numRelays,
+                  itemBuilder: (context, index) {
+                    final mejaId = index + 1;
+                    return BilliardTableCard(
+                      tableId: mejaId,
+                      relay: _relayStates[mejaId]!,
+                      isSessionActive: _activeSessions.containsKey(mejaId),
+                      onShowConfirmation: () => _showConfirmationDialog(mejaId),
+                      onCancelSession: () => _cancelSessionAndTurnOff(mejaId),
+                      onTurnOnRelay: () => _turnOnRelay(mejaId),
+                      onShowSetTimer: () => _showSetTimerDialog(mejaId),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

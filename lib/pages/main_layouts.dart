@@ -13,13 +13,20 @@ import 'package:putra_jaya_billiard/pages/stocks/stock_report_page.dart';
 import 'package:putra_jaya_billiard/pages/stocks/stocks_opname_page.dart';
 import 'package:putra_jaya_billiard/pages/suppliers/suppliers_pages.dart';
 import 'package:putra_jaya_billiard/pages/transactions/transactions_page.dart';
+import 'package:putra_jaya_billiard/services/arduino_service.dart';
 import 'package:putra_jaya_billiard/widgets/app_drawer.dart';
 import 'package:putra_jaya_billiard/widgets/custom_app_bar.dart';
 import 'package:window_manager/window_manager.dart';
 
 class MainLayout extends StatefulWidget {
   final UserModel user;
-  const MainLayout({super.key, required this.user});
+  final ArduinoService arduinoService; // Service diterima dari luar
+
+  const MainLayout({
+    super.key,
+    required this.user,
+    required this.arduinoService, // Wajib diisi saat memanggil MainLayout
+  });
 
   @override
   State<MainLayout> createState() => _MainLayoutState();
@@ -35,10 +42,20 @@ class _MainLayoutState extends State<MainLayout> {
     _buildPages();
   }
 
+  @override
+  void dispose() {
+    // Membersihkan service saat MainLayout tidak lagi digunakan
+    widget.arduinoService.dispose();
+    super.dispose();
+  }
+
   // Membangun daftar halaman berdasarkan role pengguna untuk efisiensi
   void _buildPages() {
     // Halaman yang bisa diakses semua role
-    _pageMap[0] = DashboardPage(user: widget.user);
+    _pageMap[0] = DashboardPage(
+      user: widget.user,
+      arduinoService: widget.arduinoService, // Service diteruskan ke Dashboard
+    );
     _pageMap[1] = ReportsPage(userRole: widget.user.role);
     _pageMap[6] = PosPage(currentUser: widget.user);
     _pageMap[8] = PurchasePage(currentUser: widget.user);
