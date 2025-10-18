@@ -1,7 +1,9 @@
 // lib/pages/login_page.dart
+
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:putra_jaya_billiard/services/auth_service.dart';
+import 'package:putra_jaya_billiard/widgets/forgot_password_dialog.dart'; // <-- 1. TAMBAHKAN IMPORT INI
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -27,6 +29,14 @@ class _LoginPageState extends State<LoginPage> {
     super.dispose();
   }
 
+  // <-- 2. TAMBAHKAN FUNGSI UNTUK MENAMPILKAN DIALOG
+  void _showForgotPasswordDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => const ForgotPasswordDialog(),
+    );
+  }
+
   Future<void> _signIn() async {
     if (!(_formKey.currentState?.validate() ?? false)) return;
 
@@ -36,19 +46,21 @@ class _LoginPageState extends State<LoginPage> {
     });
 
     try {
-      // Tugas LoginPage HANYA memanggil fungsi sign-in.
-      // AuthWrapper akan menangani sisanya. Ini adalah cara yang benar.
       await _authService.signInWithEmailAndPassword(
         _emailController.text.trim(),
         _passwordController.text.trim(),
       );
     } on FirebaseAuthException catch (e) {
-      if (e.code == 'user-not-found' ||
-          e.code == 'wrong-password' ||
-          e.code == 'invalid-credential') {
-        _errorMessage = 'Email atau password yang Anda masukkan salah.';
-      } else {
-        _errorMessage = 'Terjadi eror. Silakan coba lagi nanti.';
+      if (mounted) {
+        setState(() {
+          if (e.code == 'user-not-found' ||
+              e.code == 'wrong-password' ||
+              e.code == 'invalid-credential') {
+            _errorMessage = 'Email atau password yang Anda masukkan salah.';
+          } else {
+            _errorMessage = 'Terjadi eror. Silakan coba lagi nanti.';
+          }
+        });
       }
     } finally {
       if (mounted) {
@@ -82,7 +94,7 @@ class _LoginPageState extends State<LoginPage> {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     const Icon(
-                      Icons.sports, // Ganti dengan ikon yang tersedia
+                      Icons.lock_outline,
                       size: 80,
                       color: Colors.tealAccent,
                     ),
@@ -153,7 +165,19 @@ class _LoginPageState extends State<LoginPage> {
                         return null;
                       },
                     ),
-                    const SizedBox(height: 32),
+
+                    // <-- 3. TAMBAHKAN TOMBOL "LUPA PASSWORD?" DI SINI
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton(
+                        onPressed: _showForgotPasswordDialog,
+                        child: Text(
+                          'Lupa Password?',
+                          style: TextStyle(color: Colors.grey[400]),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
                     if (_errorMessage.isNotEmpty)
                       Padding(
                         padding: const EdgeInsets.only(bottom: 16.0),

@@ -157,6 +157,7 @@ class _ReportsPageState extends State<ReportsPage>
       child: _buildGeneralReportBody(start, end, title, isScrollable: false),
     );
   }
+  // --- PERBAIKAN UTAMA: Pisahkan logika shift real-time ke metode terpisah ---
 
   Widget _buildRealTimeShiftView() {
     final now = DateTime.now();

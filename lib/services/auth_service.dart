@@ -34,8 +34,6 @@ class AuthService {
     }
   }
 
-  // --- FUNGSI BARU ---
-  // Fungsi untuk mengganti password
   Future<Map<String, dynamic>> changePassword({
     required String oldPassword,
     required String newPassword,
@@ -45,25 +43,41 @@ class AuthService {
       return {'success': false, 'message': 'Pengguna tidak ditemukan.'};
     }
 
-    // Buat kredensial untuk re-autentikasi
     AuthCredential credential = EmailAuthProvider.credential(
       email: user.email!,
       password: oldPassword,
     );
 
     try {
-      // Langkah 1: Re-autentikasi pengguna untuk keamanan
       await user.reauthenticateWithCredential(credential);
-
-      // Langkah 2: Jika re-autentikasi berhasil, ubah password
       await user.updatePassword(newPassword);
-
       return {'success': true, 'message': 'Password berhasil diubah!'};
     } on FirebaseAuthException catch (e) {
-      // Tangani error umum
       print('Error changing password: ${e.code}');
       if (e.code == 'wrong-password' || e.code == 'invalid-credential') {
         return {'success': false, 'message': 'Password lama salah.'};
+      } else {
+        return {'success': false, 'message': 'Terjadi kesalahan: ${e.message}'};
+      }
+    } catch (e) {
+      return {'success': false, 'message': 'Terjadi kesalahan tidak dikenal.'};
+    }
+  }
+
+  // --- FUNGSI BARU UNTUK RESET PASSWORD ---
+  Future<Map<String, dynamic>> sendPasswordResetEmail({
+    required String email,
+  }) async {
+    try {
+      await _auth.sendPasswordResetEmail(email: email);
+      return {
+        'success': true,
+        'message': 'Link reset password telah dikirim ke email Anda.'
+      };
+    } on FirebaseAuthException catch (e) {
+      print('Error sending password reset email: ${e.code}');
+      if (e.code == 'user-not-found') {
+        return {'success': false, 'message': 'Email tidak terdaftar.'};
       } else {
         return {'success': false, 'message': 'Terjadi kesalahan: ${e.message}'};
       }

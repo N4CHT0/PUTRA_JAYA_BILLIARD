@@ -37,27 +37,42 @@ class _ChangePasswordDialogState extends State<ChangePasswordDialog> {
       _errorMessage = null;
     });
 
-    final result = await _authService.changePassword(
-      oldPassword: _oldPasswordController.text,
-      newPassword: _newPasswordController.text,
-    );
+    try {
+      // Menjalankan operasi yang berpotensi gagal
+      final result = await _authService.changePassword(
+        oldPassword: _oldPasswordController.text,
+        newPassword: _newPasswordController.text,
+      );
 
-    setState(() {
-      _isLoading = false;
-    });
-
-    if (mounted) {
-      if (result['success']) {
-        Navigator.of(context).pop(); // Tutup dialog jika berhasil
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Password berhasil diubah!'),
-            backgroundColor: Colors.green,
-          ),
-        );
-      } else {
+      if (mounted) {
+        if (result['success']) {
+          Navigator.of(context).pop();
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Password berhasil diubah!'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        } else {
+          setState(() {
+            _errorMessage = result['message'];
+          });
+        }
+      }
+    } catch (e) {
+      // Menangani error tak terduga (seperti tidak ada koneksi internet)
+      print('Terjadi error tak terduga di dialog: $e');
+      if (mounted) {
         setState(() {
-          _errorMessage = result['message'];
+          _errorMessage =
+              'Gagal terhubung ke server. Periksa koneksi internet Anda.';
+        });
+      }
+    } finally {
+      // Kode ini PASTI berjalan, untuk memastikan spinner berhenti
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
         });
       }
     }
