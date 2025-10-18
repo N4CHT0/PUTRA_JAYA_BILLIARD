@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:putra_jaya_billiard/models/user_model.dart';
 import 'package:putra_jaya_billiard/services/auth_service.dart';
-import 'package:putra_jaya_billiard/widgets/change_password_dialog.dart';
 
 class CustomAppBar extends StatelessWidget implements PreferredSizeWidget {
   final UserModel user;
