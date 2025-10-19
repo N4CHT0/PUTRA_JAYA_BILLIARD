@@ -1,24 +1,26 @@
+// lib/services/local_database_service.dart
+
 import 'dart:convert';
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
-// 'path_provider' tidak lagi dibutuhkan untuk backup, tapi mungkin masih dipakai di tempat lain
 import 'package:path_provider/path_provider.dart';
 import '../models/local_product.dart';
 import '../models/local_member.dart';
 import '../models/local_supplier.dart';
 import '../models/local_transaction.dart';
 import '../models/local_stock_mutation.dart';
+import '../models/local_payment_method.dart';
 
 class LocalDatabaseService {
-  // --- Daftar Nama Box ---
   static const _productsBox = 'products';
   static const _membersBox = 'members';
   static const _suppliersBox = 'suppliers';
   static const _transactionsBox = 'transactions';
   static const _stockMutationsBox = 'stock_mutations';
+  static const _paymentMethodsBox = 'payment_methods';
 
   static final List<String> _allBoxNames = [
     _productsBox,
@@ -26,6 +28,7 @@ class LocalDatabaseService {
     _suppliersBox,
     _transactionsBox,
     _stockMutationsBox,
+    _paymentMethodsBox,
   ];
 
   static Future<void> init() async {
@@ -34,9 +37,8 @@ class LocalDatabaseService {
     await Hive.openBox<LocalSupplier>(_suppliersBox);
     await Hive.openBox<LocalTransaction>(_transactionsBox);
     await Hive.openBox<LocalStockMutation>(_stockMutationsBox);
+    await Hive.openBox<LocalPaymentMethod>(_paymentMethodsBox);
   }
-
-  // --- FUNGSI GENERAL SETTINGS ---
 
   Future<String> backupData() async {
     final Map<String, dynamic> allData = {};
@@ -58,31 +60,33 @@ class LocalDatabaseService {
         case _stockMutationsBox:
           box = Hive.box<LocalStockMutation>(_stockMutationsBox);
           break;
+        case _paymentMethodsBox:
+          box = Hive.box<LocalPaymentMethod>(_paymentMethodsBox);
+          break;
         default:
           continue;
       }
-      final boxData = box.values.map((item) => item.toJson()).toList();
+      final Map<String, dynamic> boxData = {};
+      for (var key in box.keys) {
+        final item = box.get(key);
+        if (item != null) {
+          boxData[key.toString()] = item.toJson();
+        }
+      }
       allData[boxName] = boxData;
     }
-
     final jsonString = jsonEncode(allData);
-
-    // ✅ PERUBAHAN DI SINI: Buka dialog untuk memilih folder
     final String? selectedDirectory =
         await FilePicker.platform.getDirectoryPath(
       dialogTitle: 'Pilih Folder untuk Menyimpan Backup',
     );
-
-    // Jika pengguna membatalkan pemilihan folder
     if (selectedDirectory == null) {
       return 'Backup dibatalkan: Tidak ada folder dipilih.';
     }
-
-    final path = selectedDirectory; // Gunakan path yang dipilih
+    final path = selectedDirectory;
     final timestamp = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
     final fileName = 'putra_jaya_billiard_backup_$timestamp.json';
     final file = File('$path/$fileName');
-
     await file.writeAsString(jsonString);
     return 'Backup berhasil disimpan di: ${file.path}';
   }
@@ -120,28 +124,34 @@ class LocalDatabaseService {
   Future<void> _importDataFromFile(Map<String, dynamic> allData) async {
     for (var boxName in allData.keys) {
       if (!_allBoxNames.contains(boxName)) continue;
-      final List<dynamic> items = allData[boxName];
-      for (var itemMap in items) {
+      final Map<String, dynamic> items = allData[boxName];
+      for (var entry in items.entries) {
+        final dynamic key = entry.key;
+        final itemMap = entry.value;
         switch (boxName) {
           case _productsBox:
             await Hive.box<LocalProduct>(_productsBox)
-                .add(LocalProduct.fromJson(itemMap));
+                .put(key, LocalProduct.fromJson(itemMap));
             break;
           case _membersBox:
             await Hive.box<LocalMember>(_membersBox)
-                .add(LocalMember.fromJson(itemMap));
+                .put(key, LocalMember.fromJson(itemMap));
             break;
           case _suppliersBox:
             await Hive.box<LocalSupplier>(_suppliersBox)
-                .add(LocalSupplier.fromJson(itemMap));
+                .put(key, LocalSupplier.fromJson(itemMap));
             break;
           case _transactionsBox:
             await Hive.box<LocalTransaction>(_transactionsBox)
-                .add(LocalTransaction.fromJson(itemMap));
+                .put(key, LocalTransaction.fromJson(itemMap));
             break;
           case _stockMutationsBox:
             await Hive.box<LocalStockMutation>(_stockMutationsBox)
-                .add(LocalStockMutation.fromJson(itemMap));
+                .put(key, LocalStockMutation.fromJson(itemMap));
+            break;
+          case _paymentMethodsBox:
+            await Hive.box<LocalPaymentMethod>(_paymentMethodsBox)
+                .put(key, LocalPaymentMethod.fromJson(itemMap));
             break;
         }
       }
@@ -154,10 +164,19 @@ class LocalDatabaseService {
     await Hive.box<LocalSupplier>(_suppliersBox).clear();
     await Hive.box<LocalTransaction>(_transactionsBox).clear();
     await Hive.box<LocalStockMutation>(_stockMutationsBox).clear();
+    await Hive.box<LocalPaymentMethod>(_paymentMethodsBox).clear();
   }
 
-  // --- OPERASI CRUD (Tidak ada perubahan) ---
-  // ... (sisa kode service Anda)
+  ValueListenable<Box<LocalPaymentMethod>> getPaymentMethodsListenable() =>
+      Hive.box<LocalPaymentMethod>(_paymentMethodsBox).listenable();
+  Future<void> addPaymentMethod(LocalPaymentMethod method) async =>
+      await Hive.box<LocalPaymentMethod>(_paymentMethodsBox).add(method);
+  Future<void> updatePaymentMethod(
+          dynamic key, LocalPaymentMethod method) async =>
+      await Hive.box<LocalPaymentMethod>(_paymentMethodsBox).put(key, method);
+  Future<void> deletePaymentMethod(dynamic key) async =>
+      await Hive.box<LocalPaymentMethod>(_paymentMethodsBox).delete(key);
+
   ValueListenable<Box<LocalProduct>> getProductListenable() =>
       Hive.box<LocalProduct>(_productsBox).listenable();
   Future<void> addProduct(LocalProduct product) async =>

@@ -1,21 +1,18 @@
-// lib/pages/dashboard/dashboard_page.dart
-
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:hive_flutter/hive_flutter.dart'; // Import Hive
+import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart' as intl;
+import 'package:putra_jaya_billiard/models/cart_item_model.dart';
 import 'package:putra_jaya_billiard/models/local_member.dart';
+import 'package:putra_jaya_billiard/models/local_payment_method.dart';
+import 'package:putra_jaya_billiard/models/local_product.dart';
 import 'package:putra_jaya_billiard/models/local_transaction.dart';
-// Import model lain yang masih relevan
 import 'package:putra_jaya_billiard/models/relay_data.dart';
-import 'package:putra_jaya_billiard/models/user_model.dart'; // Dari Firebase Auth
-// Import service
+import 'package:putra_jaya_billiard/models/user_model.dart';
 import 'package:putra_jaya_billiard/pages/connection/connection_page.dart';
 import 'package:putra_jaya_billiard/services/arduino_service.dart';
 import 'package:putra_jaya_billiard/services/billing_services.dart';
-// Import service LOKAL
 import 'package:putra_jaya_billiard/services/local_database_service.dart';
-// Import widget
 import 'package:sliding_up_panel/sliding_up_panel.dart';
 import 'widgets/billiard_table_card.dart';
 import 'widgets/log_panel.dart';
@@ -25,26 +22,20 @@ const int numRelays = 32;
 class DashboardPage extends StatefulWidget {
   final UserModel user;
   final ArduinoService arduinoService;
-  // Hapus kodeOrganisasi
-  // final String kodeOrganisasi;
 
   const DashboardPage({
     super.key,
     required this.user,
     required this.arduinoService,
-    // required this.kodeOrganisasi, // Hapus
   });
 
   @override
   State<DashboardPage> createState() => DashboardPageState();
 }
 
-// Nama State class dibuat publik
 class DashboardPageState extends State<DashboardPage> {
-  // Gunakan service LOKAL
   final LocalDatabaseService _localDbService = LocalDatabaseService();
-  final BillingService _billingService =
-      BillingService(); // Masih dipakai untuk hitung tarif
+  final BillingService _billingService = BillingService();
   final Map<int, RelayData> _relayStates = {};
   final Map<int, DateTime> _activeSessions = {};
   Timer? _logicTimer;
@@ -56,7 +47,7 @@ class DashboardPageState extends State<DashboardPage> {
     super.initState();
     _initRelayStates();
     _startLogicTimer();
-    _loadRates(); // Memuat tarif dari SharedPreferences via BillingService
+    _loadRates();
     widget.arduinoService.onDataReceived = (data) => _addLog('Arduino: $data');
     widget.arduinoService.onConnectionChanged = () {
       if (mounted) setState(() {});
@@ -71,7 +62,26 @@ class DashboardPageState extends State<DashboardPage> {
     super.dispose();
   }
 
-  // Fungsi ini dipanggil oleh MainLayout setelah settings disimpan
+  // Method publik untuk menerima item dari PosPage
+  void addToCartToTable(int tableId, List<CartItem> items) {
+    setState(() {
+      final relay = _relayStates[tableId];
+      if (relay != null && _activeSessions.containsKey(tableId)) {
+        // Buat list baru agar Flutter mendeteksi perubahan
+        relay.posItems = List<CartItem>.from(relay.posItems)..addAll(items);
+        _addLog('${items.length} item F&B ditambahkan ke Meja $tableId.');
+      } else {
+        _addLog(
+            'Error: Tidak dapat menambahkan item ke Meja $tableId karena sesi tidak aktif.');
+      }
+    });
+  }
+
+  // Method publik untuk mendapatkan ID meja yang aktif
+  List<int> getActiveTableIds() {
+    return _activeSessions.keys.toList()..sort();
+  }
+
   void loadRatesAfterSave() {
     _addLog('PENGATURAN DIPERBARUI. Memuat ulang tarif...');
     _loadRates();
@@ -79,11 +89,10 @@ class DashboardPageState extends State<DashboardPage> {
 
   void _initRelayStates() {
     for (int i = 1; i <= numRelays; i++) {
-      _relayStates[i] = RelayData(id: i);
+      _relayStates[i] = RelayData(id: i, posItems: []);
     }
   }
 
-  // Load tarif tetap dari SharedPreferences via BillingService
   Future<void> _loadRates() async {
     await _billingService.loadRates();
     if (!mounted) return;
@@ -143,52 +152,63 @@ class DashboardPageState extends State<DashboardPage> {
     _addLog('Sesi billing Meja $mejaId dimulai.');
   }
 
-  // --- Fungsi Finalize Bill Diubah Total ---
-  Future<void> _finalizeAndSaveBill(int mejaId,
-      {LocalMember? member, // Terima LocalMember
-      required double subtotal,
-      required double discount,
-      required double finalTotal}) async {
+  Future<void> _finalizeAndSaveBill(
+    int mejaId, {
+    LocalMember? member,
+    required double subtotal,
+    required double discount,
+    required double finalTotal,
+    required String paymentMethod,
+  }) async {
     final startTime = _activeSessions[mejaId];
     if (startTime == null) return;
 
     final endTime = DateTime.now();
-    final durationSeconds = endTime.difference(startTime).inSeconds;
+    final relay = _relayStates[mejaId]!;
+    final int durationToBillSeconds =
+        relay.setTimerSeconds ?? endTime.difference(startTime).inSeconds;
+
+    final posItemsToSave = List<CartItem>.from(relay.posItems);
 
     _setRelayStateToOff(mejaId);
     if (mounted) {
       setState(() => _activeSessions.remove(mejaId));
     }
 
-    _addLog('Sesi Meja $mejaId selesai. Total: ${_formatCurrency(finalTotal)}');
+    _addLog(
+        'Sesi Meja $mejaId selesai. Total: ${_formatCurrency(finalTotal)} dibayar dengan $paymentMethod');
 
-    // Buat objek transaksi LOKAL
     final localTransaction = LocalTransaction(
       flow: 'income',
-      type: 'billiard',
+      type: 'billiard', // Tipe utama tetap billiard
       totalAmount: finalTotal,
-      createdAt: startTime, // Gunakan startTime sebagai waktu transaksi
+      createdAt: startTime,
       cashierId: widget.user.uid,
       cashierName: widget.user.nama,
       tableId: mejaId,
       startTime: startTime,
       endTime: endTime,
-      durationInSeconds: durationSeconds,
+      durationInSeconds: durationToBillSeconds,
       subtotal: subtotal,
       discount: discount,
-      memberId: member?.key.toString(), // Simpan key Hive sbg ID
+      memberId: member?.key.toString(),
       memberName: member?.name,
+      paymentMethod: paymentMethod,
+      items: posItemsToSave.map((item) {
+        final product = item.product as LocalProduct;
+        return {
+          'productId': product.key.toString(),
+          'productName': product.name,
+          'quantity': item.quantity,
+          'price': product.sellingPrice,
+        };
+      }).toList(),
     );
 
-    if (!mounted) return;
-
     try {
-      // Simpan transaksi ke Hive
       await _localDbService.addTransaction(localTransaction);
       _addLog('Transaksi Meja $mejaId berhasil disimpan (Lokal).');
-    } catch (e, s) {
-      print('Error saving local billing transaction: $e');
-      print(s);
+    } catch (e) {
       _addLog('ERROR: Gagal menyimpan transaksi Meja $mejaId (Lokal): $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -213,9 +233,12 @@ class DashboardPageState extends State<DashboardPage> {
     if (_activeSessions.containsKey(mejaId)) return;
     _addLog('Meja $mejaId: Mode Personal (ON)');
     setState(() {
-      _relayStates[mejaId]!.status = RelayStatus.on;
-      _relayStates[mejaId]!.timerEndTime = null;
-      _relayStates[mejaId]!.fiveMinuteWarningSent = false;
+      final relay = _relayStates[mejaId]!;
+      relay.status = RelayStatus.on;
+      relay.timerEndTime = null;
+      relay.fiveMinuteWarningSent = false;
+      relay.setTimerSeconds = null;
+      relay.posItems = [];
     });
     _sendCommand(mejaId, "1");
     _startBillingSession(mejaId);
@@ -230,6 +253,8 @@ class DashboardPageState extends State<DashboardPage> {
       relay.timerEndTime = DateTime.now().add(Duration(seconds: totalSeconds));
       relay.remainingTimeSeconds = totalSeconds;
       relay.fiveMinuteWarningSent = false;
+      relay.setTimerSeconds = totalSeconds;
+      relay.posItems = [];
     });
     _sendCommand(mejaId, "1");
     _startBillingSession(mejaId);
@@ -238,9 +263,12 @@ class DashboardPageState extends State<DashboardPage> {
   void _setRelayStateToOff(int mejaId) {
     _addLog('Meja $mejaId: Relay dimatikan.');
     setState(() {
-      _relayStates[mejaId]!.status = RelayStatus.off;
-      _relayStates[mejaId]!.timerEndTime = null;
-      _relayStates[mejaId]!.fiveMinuteWarningSent = false;
+      final relay = _relayStates[mejaId]!;
+      relay.status = RelayStatus.off;
+      relay.timerEndTime = null;
+      relay.fiveMinuteWarningSent = false;
+      relay.setTimerSeconds = null;
+      relay.posItems = [];
     });
     _sendCommand(mejaId, "0");
   }
@@ -255,12 +283,12 @@ class DashboardPageState extends State<DashboardPage> {
     _setRelayStateToOff(mejaId);
   }
 
-  // --- Dialog Konfirmasi (Gunakan LocalMember) ---
   Future<void> _showConfirmationDialog(int mejaId) async {
     final startTime = _activeSessions[mejaId];
     if (startTime == null) return;
 
-    LocalMember? selectedMemberInDialog; // Gunakan LocalMember
+    LocalMember? selectedMemberInDialog;
+    String selectedPaymentMethod = 'Cash';
 
     if (!mounted) return;
 
@@ -270,14 +298,24 @@ class DashboardPageState extends State<DashboardPage> {
       builder: (BuildContext dialogContext) {
         return StatefulBuilder(
           builder: (dialogContext, setStateInDialog) {
-            final duration = DateTime.now().difference(startTime);
-            final subtotal =
-                _billingService.calculateBilliardFee(duration, date: startTime);
+            final relay = _relayStates[mejaId]!;
+            final Duration billingDuration = relay.setTimerSeconds != null
+                ? Duration(seconds: relay.setTimerSeconds!)
+                : DateTime.now().difference(startTime);
 
+            final billiardSubtotal = _billingService
+                .calculateBilliardFee(billingDuration, date: startTime);
+            final double posSubtotal = relay.posItems.fold(
+                0,
+                (sum, item) =>
+                    sum +
+                    ((item.product as LocalProduct).sellingPrice *
+                        item.quantity));
+            final grandSubtotal = billiardSubtotal + posSubtotal;
             final discountPercentage =
                 selectedMemberInDialog?.discountPercentage ?? 0;
-            final discountAmount = subtotal * (discountPercentage / 100);
-            final finalCost = subtotal - discountAmount;
+            final discountAmount = grandSubtotal * (discountPercentage / 100);
+            final finalCost = grandSubtotal - discountAmount;
 
             return AlertDialog(
               backgroundColor: const Color(0xFF1E1E1E),
@@ -287,17 +325,71 @@ class DashboardPageState extends State<DashboardPage> {
               content: SingleChildScrollView(
                 child: ListBody(
                   children: <Widget>[
-                    Text('Durasi Main: ${_formatDuration(duration.inSeconds)}'),
-                    const SizedBox(height: 12),
-                    _buildPriceRow('Subtotal:', subtotal),
+                    Text(
+                        'Waktu Main Aktual: ${_formatDuration(DateTime.now().difference(startTime).inSeconds)}'),
+                    if (relay.setTimerSeconds != null)
+                      Text(
+                          'Durasi Paket Dikenakan: ${_formatDuration(billingDuration.inSeconds)}'),
+                    const Divider(height: 20, color: Colors.white24),
+                    _buildPriceRow('Subtotal Billiard:', billiardSubtotal),
+                    if (posSubtotal > 0)
+                      _buildPriceRow('Subtotal F&B:', posSubtotal),
                     if (discountAmount > 0)
                       _buildPriceRow(
                           'Diskon ($discountPercentage%):', -discountAmount,
                           color: Colors.amberAccent),
                     const Divider(height: 12, color: Colors.white24),
                     _buildPriceRow('Total Tagihan:', finalCost, isTotal: true),
+                    if (relay.posItems.isNotEmpty) ...[
+                      const SizedBox(height: 20),
+                      const Text('Detail Pesanan F&B:',
+                          style: TextStyle(fontWeight: FontWeight.bold)),
+                      ...relay.posItems.map((item) {
+                        final product = item.product as LocalProduct;
+                        return ListTile(
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          title: Text('${item.quantity}x ${product.name}'),
+                          trailing: Text(_formatCurrency(
+                              product.sellingPrice * item.quantity)),
+                        );
+                      }).toList(),
+                    ],
                     const Divider(height: 24, color: Colors.white24),
-                    // Gunakan ValueListenableBuilder untuk member dari Hive
+                    const Text('Metode Pembayaran:',
+                        style: TextStyle(fontSize: 12, color: Colors.grey)),
+                    ValueListenableBuilder<Box<LocalPaymentMethod>>(
+                      valueListenable:
+                          _localDbService.getPaymentMethodsListenable(),
+                      builder: (context, box, _) {
+                        final paymentMethods = box.values
+                            .where((p) => p.isActive)
+                            .map((p) => p.name)
+                            .toList();
+                        final allOptions = {'Cash', ...paymentMethods}.toList();
+
+                        return DropdownButton<String>(
+                          value: selectedPaymentMethod,
+                          isExpanded: true,
+                          underline:
+                              Container(height: 1, color: Colors.white24),
+                          dropdownColor: const Color(0xFF2c2c2c),
+                          items: allOptions.map((String value) {
+                            return DropdownMenuItem<String>(
+                                value: value, child: Text(value));
+                          }).toList(),
+                          onChanged: (String? newValue) {
+                            if (newValue != null) {
+                              setStateInDialog(
+                                  () => selectedPaymentMethod = newValue);
+                            }
+                          },
+                        );
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    const Text('Pelanggan:',
+                        style: TextStyle(fontSize: 12, color: Colors.grey)),
                     ValueListenableBuilder<Box<LocalMember>>(
                       valueListenable: _localDbService.getMemberListenable(),
                       builder: (context, box, _) {
@@ -308,36 +400,32 @@ class DashboardPageState extends State<DashboardPage> {
                             child: Text('Pelanggan Umum'),
                           ),
                           ...members.where((m) => m.isActive).map((member) {
-                            // Filter aktif
                             return DropdownMenuItem<LocalMember?>(
                               value: member,
                               child: Text(member.name),
                             );
                           }).toList(),
                         ];
-
-                        // Validasi jika _selectedMember masih ada di daftar
                         final currentSelectionExists = members
                             .any((m) => m.key == selectedMemberInDialog?.key);
                         if (!currentSelectionExists) {
-                          selectedMemberInDialog =
-                              null; // Reset jika sudah tidak ada
+                          selectedMemberInDialog = null;
                         }
-
                         return DropdownButton<LocalMember?>(
                           value: selectedMemberInDialog,
                           hint: const Text('Pilih Member (Opsional)'),
                           isExpanded: true,
-                          underline: const SizedBox.shrink(),
+                          underline:
+                              Container(height: 1, color: Colors.white24),
                           dropdownColor: const Color(0xFF2c2c2c),
                           items: items,
                           onChanged: (LocalMember? newValue) {
-                            setStateInDialog(// Gunakan setStateInDialog
+                            setStateInDialog(
                                 () => selectedMemberInDialog = newValue);
                           },
                         );
                       },
-                    )
+                    ),
                   ],
                 ),
               ),
@@ -350,13 +438,13 @@ class DashboardPageState extends State<DashboardPage> {
                   child: const Text('Konfirmasi & Bayar'),
                   onPressed: () {
                     Navigator.of(dialogContext).pop();
-                    // Kirim LocalMember ke fungsi finalize
                     _finalizeAndSaveBill(
                       mejaId,
                       member: selectedMemberInDialog,
-                      subtotal: subtotal,
+                      subtotal: grandSubtotal,
                       discount: discountAmount,
                       finalTotal: finalCost,
+                      paymentMethod: selectedPaymentMethod,
                     );
                   },
                 ),
@@ -368,9 +456,7 @@ class DashboardPageState extends State<DashboardPage> {
     );
   }
 
-  // --- Dialog Set Timer (Tidak berubah signifikan) ---
   Future<void> _showSetTimerDialog(int mejaId) async {
-    // ... (kode _showSetTimerDialog Anda sebelumnya sudah OK) ...
     if (_activeSessions.containsKey(mejaId)) {
       _addLog("Error: Meja $mejaId sudah aktif.");
       return;
@@ -551,7 +637,7 @@ class DashboardPageState extends State<DashboardPage> {
                   padding: EdgeInsets.fromLTRB(16, 16, 16, panelMinHeight + 16),
                   gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
                     maxCrossAxisExtent: 380,
-                    childAspectRatio: 1.7, // Sesuaikan rasio jika perlu
+                    childAspectRatio: 1.7,
                     crossAxisSpacing: 16,
                     mainAxisSpacing: 16,
                   ),

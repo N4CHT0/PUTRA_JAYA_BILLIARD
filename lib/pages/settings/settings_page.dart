@@ -5,7 +5,7 @@ import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class SettingsPage extends StatefulWidget {
-  final VoidCallback onSaveComplete; // Callback saat simpan selesai
+  final VoidCallback onSaveComplete;
   const SettingsPage({super.key, required this.onSaveComplete});
 
   @override
@@ -13,17 +13,25 @@ class SettingsPage extends StatefulWidget {
 }
 
 class _SettingsPageState extends State<SettingsPage> {
-  // --- Kontroler untuk 3 set tarif ---
-  final _weekdayHourRateController = TextEditingController();
-  final _weekdayMinuteRateController = TextEditingController();
-  final _weekendHourRateController = TextEditingController();
-  final _weekendMinuteRateController = TextEditingController();
+  // === Kontroler BARU ===
+  // Global
+  final _nightRateStartController = TextEditingController();
+
+  // Weekday (Siang & Malam)
+  final _weekdayDayHourRateController = TextEditingController();
+  final _weekdayNightHourRateController = TextEditingController();
+
+  // Weekend (Siang & Malam)
+  final _weekendDayHourRateController = TextEditingController();
+  final _weekendNightHourRateController = TextEditingController();
+
+  // Special Day (Siang & Malam)
   final _specialDayHourRateController = TextEditingController();
-  final _specialDayMinuteRateController = TextEditingController();
+  final _specialNightHourRateController = TextEditingController();
 
-  final _shift1StartController = TextEditingController(); // Kontroler Shift
+  // Shift (Tetap sama)
+  final _shift1StartController = TextEditingController();
 
-  // --- State untuk daftar tanggal spesial ---
   List<DateTime> _specialDates = [];
   bool _isLoading = true;
 
@@ -33,62 +41,82 @@ class _SettingsPageState extends State<SettingsPage> {
     _loadSettings();
   }
 
-  // Memuat semua pengaturan dari SharedPreferences
+  // DIUBAH: Memuat semua pengaturan dengan struktur baru
   Future<void> _loadSettings() async {
     setState(() => _isLoading = true);
     final prefs = await SharedPreferences.getInstance();
 
-    _weekdayHourRateController.text =
-        (prefs.getDouble('weekdayRatePerHour') ?? 50000).toStringAsFixed(0);
-    _weekdayMinuteRateController.text =
-        (prefs.getDouble('weekdayRatePerMinute') ?? 0).toStringAsFixed(0);
+    // Global
+    _nightRateStartController.text = (prefs.getInt('nightRateStartHour') ?? 22)
+        .toString(); // Default jam 10 malam
 
-    _weekendHourRateController.text =
-        (prefs.getDouble('weekendRatePerHour') ?? 65000).toStringAsFixed(0);
-    _weekendMinuteRateController.text =
-        (prefs.getDouble('weekendRatePerMinute') ?? 0).toStringAsFixed(0);
+    // Weekday
+    _weekdayDayHourRateController.text =
+        (prefs.getDouble('weekday_day_rate_per_hour') ?? 50000)
+            .toStringAsFixed(0);
+    _weekdayNightHourRateController.text =
+        (prefs.getDouble('weekday_night_rate_per_hour') ?? 60000)
+            .toStringAsFixed(0);
 
+    // Weekend
+    _weekendDayHourRateController.text =
+        (prefs.getDouble('weekend_day_rate_per_hour') ?? 65000)
+            .toStringAsFixed(0);
+    _weekendNightHourRateController.text =
+        (prefs.getDouble('weekend_night_rate_per_hour') ?? 75000)
+            .toStringAsFixed(0);
+
+    // Special Day
     _specialDayHourRateController.text =
-        (prefs.getDouble('specialDayRatePerHour') ?? 80000).toStringAsFixed(0);
-    _specialDayMinuteRateController.text =
-        (prefs.getDouble('specialDayRatePerMinute') ?? 0).toStringAsFixed(0);
+        (prefs.getDouble('special_day_rate_per_hour') ?? 80000)
+            .toStringAsFixed(0);
+    _specialNightHourRateController.text =
+        (prefs.getDouble('special_night_rate_per_hour') ?? 90000)
+            .toStringAsFixed(0);
 
+    // Tanggal Spesial & Shift (Tetap sama)
     final dateStrings = prefs.getStringList('specialDates') ?? [];
     _specialDates = dateStrings.map((date) => DateTime.parse(date)).toList();
-
     _shift1StartController.text =
         (prefs.getInt('shift1StartHour') ?? 8).toString();
 
     setState(() => _isLoading = false);
   }
 
-  // Menyimpan semua pengaturan ke SharedPreferences
+  // DIUBAH: Menyimpan semua pengaturan dengan struktur baru
   Future<void> _saveSettings() async {
     final prefs = await SharedPreferences.getInstance();
 
-    await prefs.setDouble('weekdayRatePerHour',
-        double.tryParse(_weekdayHourRateController.text) ?? 0);
-    await prefs.setDouble('weekdayRatePerMinute',
-        double.tryParse(_weekdayMinuteRateController.text) ?? 0);
+    // Global
+    await prefs.setInt('nightRateStartHour',
+        int.tryParse(_nightRateStartController.text) ?? 22);
 
-    await prefs.setDouble('weekendRatePerHour',
-        double.tryParse(_weekendHourRateController.text) ?? 0);
-    await prefs.setDouble('weekendRatePerMinute',
-        double.tryParse(_weekendMinuteRateController.text) ?? 0);
+    // Weekday
+    await prefs.setDouble('weekday_day_rate_per_hour',
+        double.tryParse(_weekdayDayHourRateController.text) ?? 0);
+    await prefs.setDouble('weekday_night_rate_per_hour',
+        double.tryParse(_weekdayNightHourRateController.text) ?? 0);
 
-    await prefs.setDouble('specialDayRatePerHour',
+    // Weekend
+    await prefs.setDouble('weekend_day_rate_per_hour',
+        double.tryParse(_weekendDayHourRateController.text) ?? 0);
+    await prefs.setDouble('weekend_night_rate_per_hour',
+        double.tryParse(_weekendNightHourRateController.text) ?? 0);
+
+    // Special Day
+    await prefs.setDouble('special_day_rate_per_hour',
         double.tryParse(_specialDayHourRateController.text) ?? 0);
-    await prefs.setDouble('specialDayRatePerMinute',
-        double.tryParse(_specialDayMinuteRateController.text) ?? 0);
+    await prefs.setDouble('special_night_rate_per_hour',
+        double.tryParse(_specialNightHourRateController.text) ?? 0);
 
+    // Tanggal Spesial & Shift (Tetap sama)
     final dateStrings =
         _specialDates.map((date) => date.toIso8601String()).toList();
     await prefs.setStringList('specialDates', dateStrings);
-
     await prefs.setInt(
         'shift1StartHour', int.tryParse(_shift1StartController.text) ?? 8);
 
-    if (!mounted) return; // Mounted check sebelum panggil context
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         backgroundColor: Colors.green[800],
@@ -98,17 +126,18 @@ class _SettingsPageState extends State<SettingsPage> {
         ),
       ),
     );
-    widget.onSaveComplete(); // Panggil callback untuk kembali ke Dashboard
+    widget.onSaveComplete();
   }
 
   @override
   void dispose() {
-    _weekdayHourRateController.dispose();
-    _weekdayMinuteRateController.dispose();
-    _weekendHourRateController.dispose();
-    _weekendMinuteRateController.dispose();
+    _nightRateStartController.dispose();
+    _weekdayDayHourRateController.dispose();
+    _weekdayNightHourRateController.dispose();
+    _weekendDayHourRateController.dispose();
+    _weekendNightHourRateController.dispose();
     _specialDayHourRateController.dispose();
-    _specialDayMinuteRateController.dispose();
+    _specialNightHourRateController.dispose();
     _shift1StartController.dispose();
     super.dispose();
   }
@@ -116,7 +145,7 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.transparent, // Samakan dengan MainLayout
+      backgroundColor: Colors.transparent,
       appBar: AppBar(
         title: const Text('Pengaturan Tarif & Shift'),
         backgroundColor: Colors.transparent,
@@ -127,48 +156,51 @@ class _SettingsPageState extends State<SettingsPage> {
           : ListView(
               padding: const EdgeInsets.all(24.0),
               children: [
+                // --- BAGIAN BARU: PENGATURAN WAKTU TARIF ---
+                _buildSectionTitle('Pengaturan Waktu Tarif'),
+                const SizedBox(height: 16),
+                _buildTextField(
+                  controller: _nightRateStartController,
+                  labelText: 'Jam Mulai Tarif Malam (0-23)',
+                  hintText: 'Contoh: 22 (untuk jam 10 malam)',
+                ),
+                const SizedBox(height: 48),
+
+                // --- BAGIAN TARIF DI-RESTRUKTURISASI ---
                 _buildSectionTitle('Tarif Weekday (Senin - Jumat)'),
-                const SizedBox(height: 16),
-                _buildTextField(
-                  controller: _weekdayHourRateController,
-                  labelText: 'Tarif per Jam (Weekday)',
-                  prefixText: 'Rp ',
+                _buildRateCard(
+                  title: 'Tarif Siang',
+                  hourController: _weekdayDayHourRateController,
                 ),
-                const SizedBox(height: 24),
-                _buildTextField(
-                  controller: _weekdayMinuteRateController,
-                  labelText: 'Tarif per Menit (Weekday)',
-                  prefixText: 'Rp ',
+                _buildRateCard(
+                  title: 'Tarif Malam',
+                  hourController: _weekdayNightHourRateController,
                 ),
                 const SizedBox(height: 48),
+
                 _buildSectionTitle('Tarif Weekend (Sabtu - Minggu)'),
-                const SizedBox(height: 16),
-                _buildTextField(
-                  controller: _weekendHourRateController,
-                  labelText: 'Tarif per Jam (Weekend)',
-                  prefixText: 'Rp ',
+                _buildRateCard(
+                  title: 'Tarif Siang',
+                  hourController: _weekendDayHourRateController,
                 ),
-                const SizedBox(height: 24),
-                _buildTextField(
-                  controller: _weekendMinuteRateController,
-                  labelText: 'Tarif per Menit (Weekend)',
-                  prefixText: 'Rp ',
+                _buildRateCard(
+                  title: 'Tarif Malam',
+                  hourController: _weekendNightHourRateController,
                 ),
                 const SizedBox(height: 48),
+
                 _buildSectionTitle('Tarif Hari Spesial (Libur Nasional, dll)'),
-                const SizedBox(height: 16),
-                _buildTextField(
-                  controller: _specialDayHourRateController,
-                  labelText: 'Tarif per Jam (Spesial)',
-                  prefixText: 'Rp ',
+                _buildRateCard(
+                  title: 'Tarif Siang',
+                  hourController: _specialDayHourRateController,
                 ),
-                const SizedBox(height: 24),
-                _buildTextField(
-                  controller: _specialDayMinuteRateController,
-                  labelText: 'Tarif per Menit (Spesial)',
-                  prefixText: 'Rp ',
+                _buildRateCard(
+                  title: 'Tarif Malam',
+                  hourController: _specialNightHourRateController,
                 ),
                 const SizedBox(height: 48),
+
+                // --- BAGIAN TANGGAL SPESIAL & SHIFT (Tampilan tetap sama) ---
                 _buildSectionTitle('Daftar Tanggal Hari Spesial'),
                 const SizedBox(height: 16),
                 ElevatedButton.icon(
@@ -186,9 +218,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   runSpacing: 8.0,
                   children: _specialDates.map((date) {
                     return Chip(
-                      label: Text(
-                        DateFormat('dd MMM yyyy').format(date),
-                      ),
+                      label: Text(DateFormat('dd MMM yyyy').format(date)),
                       backgroundColor: Colors.teal,
                       deleteIconColor: Colors.white70,
                       onDeleted: () {
@@ -200,6 +230,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   }).toList(),
                 ),
                 const SizedBox(height: 48),
+
                 _buildSectionTitle('Pengaturan Shift'),
                 const SizedBox(height: 16),
                 _buildTextField(
@@ -208,6 +239,8 @@ class _SettingsPageState extends State<SettingsPage> {
                   hintText: 'Contoh: 8 (untuk jam 8 pagi)',
                 ),
                 const SizedBox(height: 48),
+
+                // Tombol Simpan
                 ElevatedButton.icon(
                   icon: const Icon(Icons.save),
                   label: const Text('Simpan Pengaturan'),
@@ -229,16 +262,44 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  // Fungsi untuk memilih tanggal spesial
+  // WIDGET BARU: untuk menampilkan grup tarif (siang/malam)
+  Widget _buildRateCard(
+      {required String title, required TextEditingController hourController}) {
+    return Card(
+      color: Colors.black.withOpacity(0.15),
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: Colors.white.withOpacity(0.1)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(title,
+                style:
+                    const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            const SizedBox(height: 12),
+            _buildTextField(
+              controller: hourController,
+              labelText: 'Tarif per Jam',
+              prefixText: 'Rp ',
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Fungsi dan widget helper lainnya (tidak ada perubahan)
   Future<void> _pickSpecialDate() async {
     final DateTime? picked = await showDatePicker(
       context: context,
       initialDate: DateTime.now(),
       firstDate: DateTime.now().subtract(const Duration(days: 30)),
-      lastDate:
-          DateTime.now().add(const Duration(days: 365 * 2)), // 2 tahun ke depan
+      lastDate: DateTime.now().add(const Duration(days: 365 * 2)),
       builder: (context, child) {
-        // Optional: Theme gelap
         return Theme(
           data: ThemeData.dark().copyWith(
             colorScheme: const ColorScheme.dark(
@@ -259,7 +320,7 @@ class _SettingsPageState extends State<SettingsPage> {
       if (!_specialDates.contains(normalizedDate)) {
         setState(() {
           _specialDates.add(normalizedDate);
-          _specialDates.sort(); // Urutkan tanggal
+          _specialDates.sort();
         });
       } else {
         if (!mounted) return;
@@ -273,7 +334,6 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
-  // Helper widget untuk judul bagian
   Widget _buildSectionTitle(String title) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -291,7 +351,6 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  // Helper widget untuk TextField
   Widget _buildTextField({
     required TextEditingController controller,
     required String labelText,

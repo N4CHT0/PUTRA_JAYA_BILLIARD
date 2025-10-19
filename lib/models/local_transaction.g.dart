@@ -23,6 +23,7 @@ class LocalTransactionAdapter extends TypeAdapter<LocalTransaction> {
       createdAt: fields[3] as DateTime,
       cashierId: fields[4] as String,
       cashierName: fields[5] as String,
+      paymentMethod: fields[17] as String?,
       items: (fields[6] as List?)
           ?.map((dynamic e) => (e as Map).cast<String, dynamic>())
           ?.toList(),
@@ -42,7 +43,7 @@ class LocalTransactionAdapter extends TypeAdapter<LocalTransaction> {
   @override
   void write(BinaryWriter writer, LocalTransaction obj) {
     writer
-      ..writeByte(17)
+      ..writeByte(18)
       ..writeByte(0)
       ..write(obj.flow)
       ..writeByte(1)
@@ -76,7 +77,9 @@ class LocalTransactionAdapter extends TypeAdapter<LocalTransaction> {
       ..writeByte(15)
       ..write(obj.memberId)
       ..writeByte(16)
-      ..write(obj.memberName);
+      ..write(obj.memberName)
+      ..writeByte(17)
+      ..write(obj.paymentMethod);
   }
 
   @override

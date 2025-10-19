@@ -2,108 +2,65 @@
 
 import 'package:shared_preferences/shared_preferences.dart';
 
-// Enum untuk tipe tarif
-enum RateType { weekday, weekend, specialDay }
-
 class BillingService {
-  late SharedPreferences _prefs;
-
-  // Variabel default jika SharedPreferences kosong
-  double _weekdayRateHour = 50000, _weekdayRateMinute = 0;
-  double _weekendRateHour = 65000, _weekendRateMinute = 0;
-  double _specialDayRateHour = 80000, _specialDayRateMinute = 0;
+  // Variabel untuk menyimpan tarif yang sudah dimuat
+  int _nightRateStartHour = 22;
+  double _weekdayDayRate = 50000;
+  double _weekdayNightRate = 60000;
+  double _weekendDayRate = 65000;
+  double _weekendNightRate = 75000;
+  double _specialDayRate = 80000;
+  double _specialNightRate = 90000;
   List<DateTime> _specialDates = [];
 
-  // Memuat semua tarif dari SharedPreferences
+  // Muat semua tarif dari SharedPreferences
   Future<void> loadRates() async {
-    _prefs = await SharedPreferences.getInstance();
+    final prefs = await SharedPreferences.getInstance();
 
-    _weekdayRateHour = _prefs.getDouble('weekdayRatePerHour') ?? 50000;
-    _weekdayRateMinute = _prefs.getDouble('weekdayRatePerMinute') ?? 0;
+    _nightRateStartHour = prefs.getInt('nightRateStartHour') ?? 22;
 
-    _weekendRateHour = _prefs.getDouble('weekendRatePerHour') ?? 65000;
-    _weekendRateMinute = _prefs.getDouble('weekendRatePerMinute') ?? 0;
+    _weekdayDayRate = prefs.getDouble('weekday_day_rate_per_hour') ?? 50000;
+    _weekdayNightRate = prefs.getDouble('weekday_night_rate_per_hour') ?? 60000;
 
-    _specialDayRateHour = _prefs.getDouble('specialDayRatePerHour') ?? 80000;
-    _specialDayRateMinute = _prefs.getDouble('specialDayRatePerMinute') ?? 0;
+    _weekendDayRate = prefs.getDouble('weekend_day_rate_per_hour') ?? 65000;
+    _weekendNightRate = prefs.getDouble('weekend_night_rate_per_hour') ?? 75000;
 
-    final dateStrings = _prefs.getStringList('specialDates') ?? [];
+    _specialDayRate = prefs.getDouble('special_day_rate_per_hour') ?? 80000;
+    _specialNightRate = prefs.getDouble('special_night_rate_per_hour') ?? 90000;
+
+    final dateStrings = prefs.getStringList('specialDates') ?? [];
     _specialDates = dateStrings.map((date) => DateTime.parse(date)).toList();
   }
 
-  // Menentukan tipe tarif berdasarkan tanggal (dengan prioritas)
-  RateType getRateTypeForDate(DateTime date) {
-    // Normalisasi tanggal (hapus info jam, menit, detik)
-    final checkDate = DateTime(date.year, date.month, date.day);
+  // Menghitung total tagihan berdasarkan durasi dan tanggal mulai
+  double calculateBilliardFee(Duration duration, {required DateTime date}) {
+    // 1. Tentukan jenis hari (Weekday, Weekend, atau Spesial)
+    final normalizedDate = DateTime(date.year, date.month, date.day);
+    bool isSpecial = _specialDates.contains(normalizedDate);
+    bool isWeekend =
+        date.weekday == DateTime.saturday || date.weekday == DateTime.sunday;
 
-    // Prioritas 1: Cek Hari Spesial
-    if (_specialDates.contains(checkDate)) {
-      return RateType.specialDay;
-    }
+    // 2. Tentukan jenis waktu (Siang atau Malam) berdasarkan WAKTU MULAI sesi
+    bool isNightTime = date.hour >= _nightRateStartHour;
 
-    // Prioritas 2: Cek Weekend (Sabtu = 6, Minggu = 7)
-    if (checkDate.weekday == DateTime.saturday ||
-        checkDate.weekday == DateTime.sunday) {
-      return RateType.weekend;
-    }
-
-    // Prioritas 3: Pasti Weekday
-    return RateType.weekday;
-  }
-
-  // Menghitung total tagihan berdasarkan durasi dan tanggal
-  double calculateBilliardFee(Duration duration, {DateTime? date}) {
-    // Tentukan tanggal acuan (biasanya tanggal mulai main)
-    final billingDate = date ?? DateTime.now();
-
-    final rateType = getRateTypeForDate(billingDate);
-
+    // 3. Pilih tarif per jam yang sesuai
     double ratePerHour;
-    double ratePerMinute;
-
-    // Pilih tarif yang sesuai
-    switch (rateType) {
-      case RateType.specialDay:
-        ratePerHour = _specialDayRateHour;
-        ratePerMinute = _specialDayRateMinute;
-        break;
-      case RateType.weekend:
-        ratePerHour = _weekendRateHour;
-        ratePerMinute = _weekendRateMinute;
-        break;
-      case RateType.weekday:
-      default:
-        ratePerHour = _weekdayRateHour;
-        ratePerMinute = _weekdayRateMinute;
-        break;
-    }
-
-    // Lakukan perhitungan
-    double totalFee = 0;
-    if (ratePerMinute > 0) {
-      // Jika ada tarif per menit, gunakan itu (lebih presisi)
-      totalFee = duration.inMinutes * ratePerMinute;
-      // Atau bisa dibuat lebih presisi lagi per detik jika mau:
-      // totalFee = (duration.inSeconds / 60) * ratePerMinute;
+    if (isSpecial) {
+      ratePerHour = isNightTime ? _specialNightRate : _specialDayRate;
+    } else if (isWeekend) {
+      ratePerHour = isNightTime ? _weekendNightRate : _weekendDayRate;
     } else {
-      // Jika tidak, hitung proporsional per jam (presisi per detik)
-      totalFee = (duration.inSeconds / 3600) * ratePerHour;
+      // Weekday
+      ratePerHour = isNightTime ? _weekdayNightRate : _weekdayDayRate;
     }
 
-    // Pembulatan (opsional, sesuaikan dengan aturan bisnis Anda)
-    // Contoh: bulatkan ke atas ke kelipatan 500 terdekat
-    // if (totalFee > 0) {
-    //   totalFee = (totalFee / 500).ceil() * 500;
-    // } else {
-    //   totalFee = 0; // Pastikan tidak negatif
-    // }
+    // 4. Hitung total biaya
+    final totalSeconds = duration.inSeconds;
+    final totalFee = (totalSeconds / 3600.0) * ratePerHour;
 
-    // Atau bulatkan ke 2 desimal jika pakai tarif menit
-    // totalFee = double.parse(totalFee.toStringAsFixed(2));
+    // ✅ PERUBAHAN DI SINI: Terapkan pembulatan ke kelipatan 100 terdekat
+    final roundedFee = (totalFee / 100).round() * 100.0;
 
-    // Atau bulatkan ke integer terdekat
-    totalFee = totalFee.roundToDouble();
-
-    return totalFee;
+    return roundedFee;
   }
 }

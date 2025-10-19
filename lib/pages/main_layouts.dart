@@ -1,6 +1,7 @@
 // lib/layout/main_layout.dart
 
 import 'package:flutter/material.dart';
+import 'package:putra_jaya_billiard/models/cart_item_model.dart';
 import 'package:putra_jaya_billiard/models/user_model.dart';
 import 'package:putra_jaya_billiard/pages/accounts/accounts_page.dart';
 import 'package:putra_jaya_billiard/pages/dashboard/dashboard_page.dart';
@@ -9,7 +10,8 @@ import 'package:putra_jaya_billiard/pages/pos/pos_page.dart';
 import 'package:putra_jaya_billiard/pages/products/products_page.dart';
 import 'package:putra_jaya_billiard/pages/purchases/purchase_page.dart';
 import 'package:putra_jaya_billiard/pages/reports/reports_page.dart';
-import 'package:putra_jaya_billiard/pages/settings/general_settings_page.dart'; // Import halaman baru
+import 'package:putra_jaya_billiard/pages/settings/general_settings_page.dart';
+import 'package:putra_jaya_billiard/pages/settings/payment_methods_page.dart';
 import 'package:putra_jaya_billiard/pages/settings/settings_page.dart';
 import 'package:putra_jaya_billiard/pages/stocks/stock_card_page.dart';
 import 'package:putra_jaya_billiard/pages/stocks/stock_report_page.dart';
@@ -39,6 +41,10 @@ class _MainLayoutState extends State<MainLayout> {
   int _selectedIndex = 0;
   final Map<int, Widget> _pageMap = {};
 
+  // Kunci global untuk mengakses state dari DashboardPage
+  final GlobalKey<DashboardPageState> _dashboardKey =
+      GlobalKey<DashboardPageState>();
+
   @override
   void initState() {
     super.initState();
@@ -51,14 +57,31 @@ class _MainLayoutState extends State<MainLayout> {
     super.dispose();
   }
 
+  // Fungsi yang dipanggil dari POS untuk menambahkan item ke meja di Dashboard
+  void _handleAddToCartToTable(int tableId, List<CartItem> items) {
+    _dashboardKey.currentState?.addToCartToTable(tableId, items);
+    // Setelah item ditambahkan, otomatis pindah ke halaman dashboard
+    _onPageSelected(0);
+  }
+
+  // Fungsi yang dipanggil dari POS untuk mendapatkan daftar meja yang aktif
+  List<int> _getActiveTableIds() {
+    return _dashboardKey.currentState?.getActiveTableIds() ?? [];
+  }
+
   void _buildPages() {
     // Halaman yang bisa diakses semua role
     _pageMap[0] = DashboardPage(
+      key: _dashboardKey, // Pasang key di sini
       user: widget.user,
       arduinoService: widget.arduinoService,
     );
     _pageMap[1] = ReportsPage(userRole: widget.user.role);
-    _pageMap[6] = PosPage(currentUser: widget.user);
+    _pageMap[6] = PosPage(
+      currentUser: widget.user,
+      onAddToCartToTable: _handleAddToCartToTable, // Kirim callback
+      getActiveTableIds: _getActiveTableIds, // Kirim callback
+    );
     _pageMap[8] = PurchasePage(currentUser: widget.user);
     _pageMap[9] = const StockReportPage();
     _pageMap[11] = const StockCardPage();
@@ -72,8 +95,8 @@ class _MainLayoutState extends State<MainLayout> {
       _pageMap[7] = const SuppliersPage();
       _pageMap[10] = StockOpnamePage(currentUser: widget.user);
       _pageMap[12] = const MembersPage();
-      // Tambahkan halaman General Settings di sini
       _pageMap[13] = const GeneralSettingsPage();
+      _pageMap[14] = const PaymentMethodsPage();
     }
   }
 
@@ -130,9 +153,8 @@ class _MainLayoutState extends State<MainLayout> {
         ),
         child: IndexedStack(
           index: _selectedIndex,
-          // Ubah angka menjadi 14 (indeks tertinggi 13 + 1)
           children: List.generate(
-            14,
+            15,
             (index) =>
                 _pageMap[index] ??
                 const Center(

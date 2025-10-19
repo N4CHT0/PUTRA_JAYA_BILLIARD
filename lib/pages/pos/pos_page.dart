@@ -1,28 +1,25 @@
-// lib/pages/pos/pos_page.dart
-
 import 'package:flutter/material.dart';
-import 'package:hive_flutter/hive_flutter.dart'; // Import Hive
+import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:putra_jaya_billiard/models/cart_item_model.dart';
-// Import model LOKAL
 import 'package:putra_jaya_billiard/models/local_member.dart';
+import 'package:putra_jaya_billiard/models/local_payment_method.dart';
 import 'package:putra_jaya_billiard/models/local_product.dart';
-import 'package:putra_jaya_billiard/models/local_transaction.dart';
 import 'package:putra_jaya_billiard/models/local_stock_mutation.dart';
-// Import user model (masih dipakai dari Firebase Auth)
+import 'package:putra_jaya_billiard/models/local_transaction.dart';
 import 'package:putra_jaya_billiard/models/user_model.dart';
-// Import service LOKAL
 import 'package:putra_jaya_billiard/services/local_database_service.dart';
 
 class PosPage extends StatefulWidget {
-  final UserModel currentUser; // Masih pakai UserModel dari Firebase Auth
-  // Hapus kodeOrganisasi
-  // final String kodeOrganisasi;
+  final UserModel currentUser;
+  final Function(int, List<CartItem>) onAddToCartToTable;
+  final List<int> Function() getActiveTableIds;
 
   const PosPage({
     super.key,
     required this.currentUser,
-    // required this.kodeOrganisasi, // Hapus
+    required this.onAddToCartToTable,
+    required this.getActiveTableIds,
   });
 
   @override
@@ -30,21 +27,17 @@ class PosPage extends StatefulWidget {
 }
 
 class _PosPageState extends State<PosPage> {
-  // Gunakan service LOKAL
   final LocalDatabaseService _localDbService = LocalDatabaseService();
   final List<CartItem> _cart = [];
-  LocalMember? _selectedMember; // Gunakan LocalMember
+  LocalMember? _selectedMember;
 
   final NumberFormat _currencyFormat =
       NumberFormat.currency(locale: 'id_ID', symbol: 'Rp ', decimalDigits: 0);
 
-  // --- Fungsi AddToCart perlu diubah sedikit ---
   void _addToCart(LocalProduct product) {
-    // Terima LocalProduct
     setState(() {
-      final index = _cart.indexWhere((item) =>
-          (item.product as LocalProduct).key ==
-          product.key); // Bandingkan key Hive
+      final index = _cart.indexWhere(
+          (item) => (item.product as LocalProduct).key == product.key);
       if (index != -1) {
         if (_cart[index].quantity < product.stock) {
           _cart[index].quantity++;
@@ -56,8 +49,7 @@ class _PosPageState extends State<PosPage> {
         }
       } else {
         if (product.stock > 0) {
-          _cart.add(CartItem(
-              product: product)); // Product sekarang adalah LocalProduct
+          _cart.add(CartItem(product: product));
         } else {
           if (!mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
@@ -68,10 +60,9 @@ class _PosPageState extends State<PosPage> {
     });
   }
 
-  // --- Fungsi Update Quantity ---
   void _updateQuantity(CartItem item, int change) {
     setState(() {
-      final product = item.product as LocalProduct; // Cast ke LocalProduct
+      final product = item.product as LocalProduct;
       final newQuantity = item.quantity + change;
       if (newQuantity <= 0) {
         _cart.remove(item);
@@ -86,7 +77,6 @@ class _PosPageState extends State<PosPage> {
     });
   }
 
-  // --- Kalkulasi Harga (Perlu cast product) ---
   double get _subtotal {
     return _cart.fold(
         0,
@@ -106,12 +96,61 @@ class _PosPageState extends State<PosPage> {
     return _subtotal - _discountAmount;
   }
 
-  // --- Fungsi Checkout Diubah Total ---
   void _clearCart() {
     setState(() {
       _cart.clear();
       _selectedMember = null;
     });
+  }
+
+  Future<void> _showAddToTableDialog() async {
+    final activeTables = widget.getActiveTableIds();
+    if (activeTables.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Tidak ada meja yang sedang aktif.'),
+        backgroundColor: Colors.orangeAccent,
+      ));
+      return;
+    }
+
+    final selectedTable = await showDialog<int>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF2c2c2c),
+          title: const Text('Pilih Meja'),
+          content: SizedBox(
+            width: double.minPositive,
+            child: ListView.builder(
+              shrinkWrap: true,
+              itemCount: activeTables.length,
+              itemBuilder: (context, index) {
+                final tableId = activeTables[index];
+                return ListTile(
+                  title: Text('Meja $tableId'),
+                  onTap: () {
+                    Navigator.of(context).pop(tableId);
+                  },
+                );
+              },
+            ),
+          ),
+        );
+      },
+    );
+
+    if (selectedTable != null) {
+      widget.onAddToCartToTable(selectedTable, List<CartItem>.from(_cart));
+      _clearCart();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content:
+              Text('Item berhasil ditambahkan ke tagihan Meja $selectedTable!'),
+          backgroundColor: Colors.blueAccent,
+        ));
+      }
+    }
   }
 
   Future<void> _checkout() async {
@@ -122,36 +161,87 @@ class _PosPageState extends State<PosPage> {
       return;
     }
 
-    if (!mounted) return; // Mounted check sebelum async
+    String selectedPaymentMethod = 'Cash';
+
     final confirm = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF2c2c2c),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        title: const Text('Konfirmasi Transaksi'),
-        content: Text('Subtotal: ${_currencyFormat.format(_subtotal)}\n'
-            'Diskon: - ${_currencyFormat.format(_discountAmount)}\n'
-            'Total: ${_currencyFormat.format(_totalPrice)}\n\n'
-            'Atas nama: ${_selectedMember?.name ?? "Pelanggan Umum"}\nLanjutkan pembayaran?'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Batal')),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.teal),
-            onPressed: () => Navigator.pop(ctx, true), // Konfirmasi bayar
-            child: const Text('Bayar'),
-          ),
-        ],
-      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setStateInDialog) {
+            return AlertDialog(
+              backgroundColor: const Color(0xFF2c2c2c),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
+              title: const Text('Konfirmasi Transaksi'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Subtotal: ${_currencyFormat.format(_subtotal)}'),
+                    if (_discountAmount > 0)
+                      Text(
+                          'Diskon: - ${_currencyFormat.format(_discountAmount)}'),
+                    Text('Total: ${_currencyFormat.format(_totalPrice)}',
+                        style: const TextStyle(fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 8),
+                    Text(
+                        'Atas nama: ${_selectedMember?.name ?? "Pelanggan Umum"}'),
+                    const Divider(height: 24, color: Colors.white24),
+                    const Text('Metode Pembayaran:',
+                        style: TextStyle(fontSize: 12, color: Colors.grey)),
+                    ValueListenableBuilder<Box<LocalPaymentMethod>>(
+                      valueListenable:
+                          _localDbService.getPaymentMethodsListenable(),
+                      builder: (context, box, _) {
+                        final paymentMethods = box.values
+                            .where((p) => p.isActive)
+                            .map((p) => p.name)
+                            .toList();
+                        final allOptions = {'Cash', ...paymentMethods}.toList();
+
+                        return DropdownButton<String>(
+                          value: selectedPaymentMethod,
+                          isExpanded: true,
+                          underline:
+                              Container(height: 1, color: Colors.white24),
+                          dropdownColor: const Color(0xFF2c2c2c),
+                          items: allOptions.map((String value) {
+                            return DropdownMenuItem<String>(
+                                value: value, child: Text(value));
+                          }).toList(),
+                          onChanged: (String? newValue) {
+                            if (newValue != null) {
+                              setStateInDialog(
+                                  () => selectedPaymentMethod = newValue);
+                            }
+                          },
+                        );
+                      },
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                    onPressed: () => Navigator.pop(ctx, false),
+                    child: const Text('Batal')),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.teal),
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: const Text('Bayar'),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
 
     if (confirm == true) {
-      if (!mounted) return; // Mounted check sebelum async utama
+      if (!mounted) return;
       try {
         final now = DateTime.now();
-
-        // 1. Buat Objek Transaksi Lokal
         final localTransaction = LocalTransaction(
           flow: 'income',
           type: 'pos',
@@ -161,12 +251,13 @@ class _PosPageState extends State<PosPage> {
           cashierName: widget.currentUser.nama,
           subtotal: _subtotal,
           discount: _discountAmount,
-          memberId: _selectedMember?.key.toString(), // Simpan key Hive sbg ID
+          memberId: _selectedMember?.key.toString(),
           memberName: _selectedMember?.name,
+          paymentMethod: selectedPaymentMethod,
           items: _cart.map((item) {
             final product = item.product as LocalProduct;
             return {
-              'productId': product.key.toString(), // Simpan key Hive sbg ID
+              'productId': product.key.toString(),
               'productName': product.name,
               'quantity': item.quantity,
               'price': product.sellingPrice,
@@ -174,30 +265,23 @@ class _PosPageState extends State<PosPage> {
           }).toList(),
         );
 
-        // 2. Simpan Transaksi Lokal
         await _localDbService.addTransaction(localTransaction);
 
-        // 3. Update Stok Produk Lokal & Buat Mutasi Stok Lokal
         for (var item in _cart) {
           final product = item.product as LocalProduct;
           final stockBefore = product.stock;
-
-          // Buat Mutasi Stok Lokal
           final mutation = LocalStockMutation(
-            productId: product.key.toString(), // Gunakan key Hive
+            productId: product.key.toString(),
             productName: product.name,
-            type: 'sale', // Simpan tipe sebagai string
+            type: 'sale',
             quantityChange: -item.quantity,
             stockBefore: stockBefore,
-            notes: 'POS Transaksi', // Bisa tambahkan ID unik lokal jika perlu
+            notes: 'POS Transaksi',
             date: now,
             userId: widget.currentUser.uid,
             userName: widget.currentUser.nama,
           );
-          // Simpan Mutasi Lokal
           await _localDbService.addStockMutation(mutation);
-
-          // Update Stok Produk Lokal (menggunakan key Hive)
           await _localDbService.decreaseStockForSale(
               product.key, item.quantity);
         }
@@ -207,13 +291,12 @@ class _PosPageState extends State<PosPage> {
           _selectedMember = null;
         });
 
-        if (!mounted) return; // Mounted check setelah async
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('Transaksi berhasil disimpan (Lokal)!'),
           backgroundColor: Colors.green,
         ));
       } catch (e, s) {
-        // Tambah stack trace
         print('Error during checkout: $e');
         print(s);
         if (!mounted) return;
@@ -242,7 +325,7 @@ class _PosPageState extends State<PosPage> {
         ],
       ),
       body: Row(
-        crossAxisAlignment: CrossAxisAlignment.start, // Align top
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Expanded(flex: 2, child: _buildProductList()),
           const VerticalDivider(width: 1, color: Colors.white24),
@@ -254,19 +337,16 @@ class _PosPageState extends State<PosPage> {
 
   Widget _buildProductList() {
     return Container(
-      margin: const EdgeInsets.all(8.0), // Tambah margin
+      margin: const EdgeInsets.all(8.0),
       decoration: BoxDecoration(
         color: const Color(0xFF1E1E1E).withOpacity(0.5),
         borderRadius: BorderRadius.circular(12),
       ),
-      // Gunakan ValueListenableBuilder untuk produk dari Hive
       child: ValueListenableBuilder<Box<LocalProduct>>(
         valueListenable: _localDbService.getProductListenable(),
         builder: (context, box, _) {
-          final products = box.values
-              .where((p) => p.isActive) // Filter produk aktif
-              .toList()
-              .cast<LocalProduct>();
+          final products =
+              box.values.where((p) => p.isActive).toList().cast<LocalProduct>();
 
           if (products.isEmpty) {
             return const Center(child: Text('Tidak ada produk aktif.'));
@@ -305,7 +385,7 @@ class _PosPageState extends State<PosPage> {
                                 style: TextStyle(
                                     color: product.stock <= 5
                                         ? Colors.redAccent
-                                        : Colors.grey[400], // Warna stok
+                                        : Colors.grey[400],
                                     fontSize: 12)),
                             Text(_currencyFormat.format(product.sellingPrice),
                                 style:
@@ -326,8 +406,7 @@ class _PosPageState extends State<PosPage> {
 
   Widget _buildCartSide() {
     return Container(
-      // Bungkus Column dengan Container
-      margin: const EdgeInsets.all(8.0), // Tambah margin
+      margin: const EdgeInsets.all(8.0),
       child: Column(
         children: [
           _buildMemberSelector(),
@@ -345,7 +424,6 @@ class _PosPageState extends State<PosPage> {
         color: const Color(0xFF1E1E1E).withOpacity(0.5),
         borderRadius: BorderRadius.circular(12),
       ),
-      // Gunakan ValueListenableBuilder untuk member dari Hive
       child: ValueListenableBuilder<Box<LocalMember>>(
         valueListenable: _localDbService.getMemberListenable(),
         builder: (context, box, _) {
@@ -356,7 +434,6 @@ class _PosPageState extends State<PosPage> {
               child: Text('Pelanggan Umum'),
             ),
             ...members.where((m) => m.isActive).map((member) {
-              // Filter member aktif
               return DropdownMenuItem<LocalMember?>(
                 value: member,
                 child: Text(member.name),
@@ -368,8 +445,8 @@ class _PosPageState extends State<PosPage> {
             value: _selectedMember,
             hint: const Text('Pilih Member (Opsional)'),
             isExpanded: true,
-            underline: const SizedBox.shrink(), // Hapus garis bawah
-            dropdownColor: const Color(0xFF2c2c2c), // Warna dropdown
+            underline: const SizedBox.shrink(),
+            dropdownColor: const Color(0xFF2c2c2c),
             items: items,
             onChanged: (LocalMember? newValue) {
               setState(() => _selectedMember = newValue);
@@ -393,7 +470,7 @@ class _PosPageState extends State<PosPage> {
             'Keranjang',
             style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
           ),
-          const Divider(height: 24, color: Colors.white24), // Warna divider
+          const Divider(height: 24, color: Colors.white24),
           Expanded(
             child: _cart.isEmpty
                 ? const Center(child: Text('Keranjang kosong'))
@@ -401,9 +478,9 @@ class _PosPageState extends State<PosPage> {
                     itemCount: _cart.length,
                     itemBuilder: (context, index) {
                       final item = _cart[index];
-                      final product = item.product as LocalProduct; // Cast
+                      final product = item.product as LocalProduct;
                       return ListTile(
-                        dense: true, // Buat lebih ringkas
+                        dense: true,
                         contentPadding: EdgeInsets.zero,
                         title: Text(product.name),
                         subtitle: Text(_currencyFormat
@@ -412,29 +489,24 @@ class _PosPageState extends State<PosPage> {
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             IconButton(
-                              constraints:
-                                  const BoxConstraints(), // Hapus padding default
+                              constraints: const BoxConstraints(),
                               padding:
                                   const EdgeInsets.symmetric(horizontal: 4),
                               icon: const Icon(Icons.remove_circle_outline,
-                                  size: 20,
-                                  color: Colors.amber), // Icon & warna
+                                  size: 20, color: Colors.amber),
                               onPressed: () => _updateQuantity(item, -1),
                             ),
                             Text(item.quantity.toString(),
                                 style: const TextStyle(fontSize: 16)),
                             IconButton(
-                              constraints:
-                                  const BoxConstraints(), // Hapus padding default
+                              constraints: const BoxConstraints(),
                               padding:
                                   const EdgeInsets.symmetric(horizontal: 4),
                               icon: const Icon(Icons.add_circle_outline,
-                                  size: 20,
-                                  color: Colors.cyanAccent), // Icon & warna
+                                  size: 20, color: Colors.cyanAccent),
                               onPressed: () => _updateQuantity(item, 1),
                             ),
                             IconButton(
-                              // Tombol hapus item dari cart
                               constraints: const BoxConstraints(),
                               padding: const EdgeInsets.only(left: 8),
                               icon: const Icon(Icons.delete_outline,
@@ -455,24 +527,36 @@ class _PosPageState extends State<PosPage> {
             _buildPriceRow('Diskon (${_selectedMember!.discountPercentage}%):',
                 -_discountAmount,
                 color: Colors.amberAccent),
-          const Divider(color: Colors.white24), // Warna divider
+          const Divider(color: Colors.white24),
           _buildPriceRow('Total:', _totalPrice, isTotal: true),
           const SizedBox(height: 16),
           SizedBox(
             width: double.infinity,
             child: ElevatedButton.icon(
-              onPressed: _cart.isNotEmpty
-                  ? _checkout
-                  : null, // Disable jika cart kosong
+              onPressed: _cart.isNotEmpty ? _checkout : null,
               icon: const Icon(Icons.payment),
-              label: const Text('Bayar'),
+              label: const Text('Bayar Langsung'),
               style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.teal,
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(vertical: 16),
                   shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12)) // Border radius
-                  ),
+                      borderRadius: BorderRadius.circular(12))),
+            ),
+          ),
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: _cart.isNotEmpty ? _showAddToTableDialog : null,
+              icon: const Icon(Icons.add_to_photos_rounded),
+              label: const Text('Tambah ke Tagihan Meja'),
+              style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.cyanAccent,
+                  side: const BorderSide(color: Colors.cyanAccent),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12))),
             ),
           )
         ],
@@ -480,7 +564,6 @@ class _PosPageState extends State<PosPage> {
     );
   }
 
-  // Widget helper _buildPriceRow (sudah ada sebelumnya, pastikan benar)
   Widget _buildPriceRow(String label, double amount,
       {bool isTotal = false, Color? color}) {
     return Padding(

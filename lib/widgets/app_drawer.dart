@@ -1,3 +1,5 @@
+// lib/widgets/app_drawer.dart
+
 import 'package:flutter/material.dart';
 import 'package:putra_jaya_billiard/models/user_model.dart';
 
@@ -107,6 +109,11 @@ class AppDrawer extends StatelessWidget {
                 leading: const Icon(Icons.price_change_rounded),
                 title: const Text('Price Settings'),
                 onTap: () => handleNavigation(4),
+              ),
+              ListTile(
+                leading: const Icon(Icons.payment_rounded),
+                title: const Text('Metode Pembayaran'),
+                onTap: () => handleNavigation(14),
               ),
               ListTile(
                 leading: const Icon(Icons.settings_rounded),

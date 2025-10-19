@@ -1,6 +1,9 @@
+// lib/pages/purchases/purchase_page.dart
+
 import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
+import 'package:putra_jaya_billiard/models/local_payment_method.dart';
 import 'package:putra_jaya_billiard/models/local_product.dart';
 import 'package:putra_jaya_billiard/models/local_supplier.dart';
 import 'package:putra_jaya_billiard/models/local_transaction.dart';
@@ -25,6 +28,7 @@ class _PurchasePageState extends State<PurchasePage> {
   final LocalDatabaseService _localDbService = LocalDatabaseService();
   final List<PurchaseItem> _purchaseItems = [];
   LocalSupplier? _selectedSupplier;
+  String _selectedPaymentMethod = 'Cash'; // ✅ State untuk metode pembayaran
 
   final NumberFormat _currencyFormat =
       NumberFormat.currency(locale: 'id_ID', symbol: 'Rp ', decimalDigits: 0);
@@ -85,7 +89,7 @@ class _PurchasePageState extends State<PurchasePage> {
   void _showItemDetailDialog(LocalProduct product) {
     final qtyController = TextEditingController(text: '1');
     final priceController =
-        TextEditingController(text: product.purchasePrice.toString());
+        TextEditingController(text: product.purchasePrice.toStringAsFixed(0));
     final formKey = GlobalKey<FormState>();
 
     if (!mounted) return;
@@ -218,6 +222,7 @@ class _PurchasePageState extends State<PurchasePage> {
           cashierName: widget.currentUser.nama,
           supplierId: _selectedSupplier!.key.toString(),
           supplierName: _selectedSupplier!.name,
+          paymentMethod: _selectedPaymentMethod, // ✅ Gunakan state
           items: _purchaseItems.map((item) {
             final product = item.product as LocalProduct;
             return {
@@ -248,8 +253,6 @@ class _PurchasePageState extends State<PurchasePage> {
           );
           await _localDbService.addStockMutation(mutation);
 
-          // --- PERBAIKAN DI SINI ---
-          // Mengirim `product.key` (int/dynamic) secara langsung, bukan string
           await _localDbService.increaseStockForPurchase(
               product.key, item.quantity, item.purchasePrice);
         }
@@ -257,6 +260,7 @@ class _PurchasePageState extends State<PurchasePage> {
         setState(() {
           _purchaseItems.clear();
           _selectedSupplier = null;
+          _selectedPaymentMethod = 'Cash'; // Reset ke default
         });
 
         if (!mounted) return;
@@ -397,32 +401,72 @@ class _PurchasePageState extends State<PurchasePage> {
         color: const Color(0xFF1E1E1E).withOpacity(0.5),
         borderRadius: BorderRadius.circular(12),
       ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      child: Column(
         children: [
-          Column(
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Total Pembelian:', style: TextStyle(fontSize: 18)),
-              Text(_currencyFormat.format(_totalAmount),
-                  style: const TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.cyanAccent)),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Total Pembelian:',
+                        style: TextStyle(fontSize: 18)),
+                    Text(_currencyFormat.format(_totalAmount),
+                        style: const TextStyle(
+                            fontSize: 22,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.cyanAccent)),
+                    const SizedBox(height: 16),
+                    const Text('Metode Pembayaran:',
+                        style: TextStyle(fontSize: 12, color: Colors.grey)),
+                    ValueListenableBuilder<Box<LocalPaymentMethod>>(
+                      valueListenable:
+                          _localDbService.getPaymentMethodsListenable(),
+                      builder: (context, box, _) {
+                        final paymentMethods = box.values
+                            .where((p) => p.isActive)
+                            .map((p) => p.name)
+                            .toList();
+                        final allOptions = {'Cash', ...paymentMethods}.toList();
+                        return DropdownButton<String>(
+                          value: _selectedPaymentMethod,
+                          isExpanded: true,
+                          underline:
+                              Container(height: 1, color: Colors.white24),
+                          dropdownColor: const Color(0xFF2c2c2c),
+                          items: allOptions.map((String value) {
+                            return DropdownMenuItem<String>(
+                                value: value, child: Text(value));
+                          }).toList(),
+                          onChanged: (String? newValue) {
+                            if (newValue != null) {
+                              setState(() => _selectedPaymentMethod = newValue);
+                            }
+                          },
+                        );
+                      },
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 16),
+              ElevatedButton(
+                onPressed:
+                    _purchaseItems.isNotEmpty && _selectedSupplier != null
+                        ? _savePurchase
+                        : null,
+                style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.teal,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 32, vertical: 16),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12))),
+                child: const Text('Simpan Transaksi'),
+              ),
             ],
-          ),
-          ElevatedButton(
-            onPressed: _purchaseItems.isNotEmpty && _selectedSupplier != null
-                ? _savePurchase
-                : null,
-            style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.teal,
-                foregroundColor: Colors.white,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12))),
-            child: const Text('Simpan Transaksi'),
           ),
         ],
       ),

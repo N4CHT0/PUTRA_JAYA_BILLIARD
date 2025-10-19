@@ -14,14 +14,18 @@ import 'models/local_member.dart';
 import 'models/local_supplier.dart';
 import 'models/local_transaction.dart';
 import 'models/local_stock_mutation.dart';
-// Tambahkan import model Hive lain jika ada
+import 'models/local_payment_method.dart'; // ✅ IMPORT MODEL BARU
+
+// Import service Anda
+import 'services/local_database_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // --- Inisialisasi Hive ---
-  final appDocumentDir = await getApplicationDocumentsDirectory();
-  await Hive.initFlutter(appDocumentDir.path);
+  // Inisialisasi path tidak lagi diperlukan dengan initFlutter() versi baru,
+  // tapi tidak masalah jika tetap ada.
+  await Hive.initFlutter();
 
   // --- 2. Daftarkan SEMUA Adapter ---
   Hive.registerAdapter(LocalProductAdapter());
@@ -29,15 +33,11 @@ void main() async {
   Hive.registerAdapter(LocalSupplierAdapter());
   Hive.registerAdapter(LocalTransactionAdapter());
   Hive.registerAdapter(LocalStockMutationAdapter());
-  // ...daftarkan adapter lainnya jika ada...
+  Hive.registerAdapter(LocalPaymentMethodAdapter()); // ✅ DAFTARKAN ADAPTER BARU
 
-  // --- 3. Buka SEMUA Box ---
-  await Hive.openBox<LocalProduct>('products');
-  await Hive.openBox<LocalMember>('members');
-  await Hive.openBox<LocalSupplier>('suppliers');
-  await Hive.openBox<LocalTransaction>('transactions');
-  await Hive.openBox<LocalStockMutation>('stock_mutations');
-  // ...buka box lainnya jika ada...
+  // --- 3. Panggil Service untuk Membuka Semua Box ---
+  // Ini lebih rapi daripada membuka box satu per satu di sini.
+  await LocalDatabaseService.init();
 
   // --- Inisialisasi Firebase (jika masih diperlukan untuk Auth) ---
   await Firebase.initializeApp(

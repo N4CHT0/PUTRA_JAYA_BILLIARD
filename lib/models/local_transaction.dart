@@ -2,21 +2,21 @@
 
 import 'package:hive/hive.dart';
 
-part 'local_transaction.g.dart'; // Akan digenerate ulang
+part 'local_transaction.g.dart';
 
-@HiveType(typeId: 4) // ID Tipe unik
+@HiveType(typeId: 4)
 class LocalTransaction extends HiveObject {
   @HiveField(0)
-  String flow; // 'income' atau 'expense'
+  String flow;
 
   @HiveField(1)
-  String type; // 'billiard', 'pos', 'purchase'
+  String type;
 
   @HiveField(2)
   double totalAmount;
 
   @HiveField(3)
-  DateTime createdAt; // Gunakan DateTime biasa
+  DateTime createdAt;
 
   @HiveField(4)
   String cashierId;
@@ -57,7 +57,10 @@ class LocalTransaction extends HiveObject {
   @HiveField(16)
   String? memberName;
 
-  // Constructor
+  // ✅ UBAH DI SINI
+  @HiveField(17)
+  String? paymentMethod;
+
   LocalTransaction({
     required this.flow,
     required this.type,
@@ -65,6 +68,8 @@ class LocalTransaction extends HiveObject {
     required this.createdAt,
     required this.cashierId,
     required this.cashierName,
+    // ✅ UBAH DI SINI
+    this.paymentMethod = 'Cash',
     this.items,
     this.supplierId,
     this.supplierName,
@@ -78,12 +83,11 @@ class LocalTransaction extends HiveObject {
     this.memberName,
   });
 
-  // Method untuk mengubah objek menjadi Map (JSON) untuk backup
   Map<String, dynamic> toJson() => {
         'flow': flow,
         'type': type,
         'totalAmount': totalAmount,
-        'createdAt': createdAt.toIso8601String(), // Simpan sbg string
+        'createdAt': createdAt.toIso8601String(),
         'cashierId': cashierId,
         'cashierName': cashierName,
         'items': items,
@@ -97,16 +101,15 @@ class LocalTransaction extends HiveObject {
         'discount': discount,
         'memberId': memberId,
         'memberName': memberName,
+        'paymentMethod': paymentMethod,
       };
 
-  // Factory constructor untuk membuat objek dari Map (JSON) untuk restore/import
   factory LocalTransaction.fromJson(Map<String, dynamic> json) =>
       LocalTransaction(
         flow: json['flow'],
         type: json['type'],
         totalAmount: json['totalAmount'],
-        createdAt: DateTime.parse(
-            json['createdAt']), // Ubah string kembali ke DateTime
+        createdAt: DateTime.parse(json['createdAt']),
         cashierId: json['cashierId'],
         cashierName: json['cashierName'],
         items: (json['items'] as List<dynamic>?)
@@ -125,5 +128,6 @@ class LocalTransaction extends HiveObject {
         discount: json['discount'],
         memberId: json['memberId'],
         memberName: json['memberName'],
+        paymentMethod: json['paymentMethod'] ?? 'Cash',
       );
 }
