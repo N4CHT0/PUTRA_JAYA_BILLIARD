@@ -1,30 +1,22 @@
-// lib/pages/products/products_page.dart
-
 import 'package:flutter/material.dart';
-import 'package:hive_flutter/hive_flutter.dart'; // Import Hive Flutter
+import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
-// Import model LOKAL
 import 'package:putra_jaya_billiard/models/local_product.dart';
-// Import service LOKAL
+import 'package:putra_jaya_billiard/models/product_variant.dart';
 import 'package:putra_jaya_billiard/services/local_database_service.dart';
 
 class ProductsPage extends StatefulWidget {
-  // Hapus kodeOrganisasi jika tidak diperlukan lagi
-  // final String kodeOrganisasi;
-
-  const ProductsPage({super.key}); // Hapus parameter
+  const ProductsPage({super.key});
 
   @override
   State<ProductsPage> createState() => _ProductsPageState();
 }
 
 class _ProductsPageState extends State<ProductsPage> {
-  // Gunakan service LOKAL
   final LocalDatabaseService _localDbService = LocalDatabaseService();
   final NumberFormat _currencyFormat =
       NumberFormat.currency(locale: 'id_ID', symbol: 'Rp ', decimalDigits: 0);
 
-  // Dialog untuk menambah atau mengedit produk (sekarang pakai LocalProduct)
   void _showProductDialog({LocalProduct? product, dynamic productKey}) {
     final formKey = GlobalKey<FormState>();
     final nameController = TextEditingController(text: product?.name);
@@ -33,10 +25,12 @@ class _ProductsPageState extends State<ProductsPage> {
         TextEditingController(text: product?.purchasePrice.toString() ?? '0');
     final sellingPriceController =
         TextEditingController(text: product?.sellingPrice.toString() ?? '0');
-    // Stok awal hanya bisa diatur saat tambah produk, saat edit diambil dari data
-    final stockController = TextEditingController(
-        text: product == null ? '0' : product.stock.toString());
+    final stockController =
+        TextEditingController(text: product?.stock.toString() ?? '0');
     bool isActive = product?.isActive ?? true;
+
+    List<ProductVariant> variants =
+        List<ProductVariant>.from(product?.variants ?? []);
 
     showDialog(
       context: context,
@@ -52,6 +46,8 @@ class _ProductsPageState extends State<ProductsPage> {
             child: SingleChildScrollView(
               child: StatefulBuilder(
                 builder: (BuildContext context, StateSetter setState) {
+                  bool hasVariants = variants.isNotEmpty;
+
                   return Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -67,14 +63,18 @@ class _ProductsPageState extends State<ProductsPage> {
                           validator: (v) => v!.isEmpty ? 'Wajib diisi' : null),
                       TextFormField(
                           controller: sellingPriceController,
-                          decoration:
-                              const InputDecoration(labelText: 'Harga Jual'),
+                          enabled: !hasVariants,
+                          decoration: InputDecoration(
+                              labelText: hasVariants
+                                  ? 'Harga Jual (ditentukan oleh varian)'
+                                  : 'Harga Jual'),
                           keyboardType: TextInputType.number,
                           validator: (v) {
-                            if (v == null ||
-                                v.isEmpty ||
-                                double.tryParse(v) == null ||
-                                double.parse(v) < 0) {
+                            if (!hasVariants &&
+                                (v == null ||
+                                    v.isEmpty ||
+                                    double.tryParse(v) == null ||
+                                    double.parse(v) < 0)) {
                               return 'Harga jual tidak valid';
                             }
                             return null;
@@ -93,7 +93,6 @@ class _ProductsPageState extends State<ProductsPage> {
                             }
                             return null;
                           }),
-                      // Stok hanya bisa diinput saat TAMBAH produk baru
                       if (product == null)
                         TextFormField(
                             controller: stockController,
@@ -110,6 +109,58 @@ class _ProductsPageState extends State<ProductsPage> {
                               return null;
                             }),
                       const SizedBox(height: 16),
+                      const Divider(color: Colors.white24),
+                      const SizedBox(height: 8),
+                      const Text('Varian Produk',
+                          style: TextStyle(
+                              fontSize: 16, fontWeight: FontWeight.bold)),
+                      if (variants.isEmpty)
+                        const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 8.0),
+                          child: Text(
+                              'Belum ada varian. Harga jual utama akan digunakan.',
+                              style:
+                                  TextStyle(color: Colors.grey, fontSize: 12)),
+                        ),
+                      Column(
+                        children: variants.map((variant) {
+                          return ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: Text(variant.name),
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(_currencyFormat.format(variant.price)),
+                                IconButton(
+                                  icon: const Icon(Icons.delete_outline,
+                                      color: Colors.redAccent),
+                                  onPressed: () {
+                                    setState(() {
+                                      variants.remove(variant);
+                                    });
+                                  },
+                                ),
+                              ],
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton.icon(
+                          icon: const Icon(Icons.add, size: 16),
+                          label: const Text('Tambah Varian'),
+                          onPressed: () async {
+                            final newVariant = await _showAddVariantDialog();
+                            if (newVariant != null) {
+                              setState(() {
+                                variants.add(newVariant);
+                              });
+                            }
+                          },
+                        ),
+                      ),
+                      const Divider(color: Colors.white24),
                       CheckboxListTile(
                         title: const Text('Produk Aktif'),
                         value: isActive,
@@ -134,34 +185,30 @@ class _ProductsPageState extends State<ProductsPage> {
               onPressed: () async {
                 if (formKey.currentState!.validate()) {
                   final newProduct = LocalProduct(
-                    // id tidak perlu diisi saat tambah, Hive akan generate key
                     name: nameController.text,
                     unit: unitController.text,
                     sellingPrice:
                         double.tryParse(sellingPriceController.text) ?? 0,
                     purchasePrice:
                         double.tryParse(purchasePriceController.text) ?? 0,
-                    // Saat edit, stok tidak diubah dari sini (diubah via opname/transaksi)
                     stock: product?.stock ??
                         int.tryParse(stockController.text) ??
                         0,
                     isActive: isActive,
+                    variants: variants,
                   );
 
                   try {
                     if (product == null) {
-                      // Tambah produk baru ke Hive
                       await _localDbService.addProduct(newProduct);
                     } else {
-                      // Update produk yang ada di Hive menggunakan key
                       await _localDbService.updateProduct(
                           productKey, newProduct);
                     }
-                    if (!mounted) return; // Mounted check
+                    if (!mounted) return;
                     Navigator.pop(context);
                   } catch (e) {
                     if (!mounted) return;
-                    Navigator.pop(context);
                     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
                       content: Text('Gagal menyimpan: $e'),
                       backgroundColor: Colors.red,
@@ -177,7 +224,67 @@ class _ProductsPageState extends State<ProductsPage> {
     );
   }
 
-  // Fungsi konfirmasi hapus (sekarang pakai key)
+  Future<ProductVariant?> _showAddVariantDialog() async {
+    final formKey = GlobalKey<FormState>();
+    final nameController = TextEditingController();
+    final priceController = TextEditingController();
+
+    return showDialog<ProductVariant>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF3c3c3c),
+          title: const Text('Tambah Varian Baru'),
+          content: Form(
+            key: formKey,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextFormField(
+                  controller: nameController,
+                  decoration: const InputDecoration(
+                      labelText: 'Nama Varian (e.g., Double Shot)'),
+                  validator: (v) => v!.isEmpty ? 'Wajib diisi' : null,
+                ),
+                TextFormField(
+                  controller: priceController,
+                  decoration: const InputDecoration(labelText: 'Harga Varian'),
+                  keyboardType: TextInputType.number,
+                  validator: (v) {
+                    if (v == null ||
+                        v.isEmpty ||
+                        double.tryParse(v) == null ||
+                        double.parse(v) < 0) {
+                      return 'Harga tidak valid';
+                    }
+                    return null;
+                  },
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Batal')),
+            ElevatedButton(
+              onPressed: () {
+                if (formKey.currentState!.validate()) {
+                  final newVariant = ProductVariant(
+                    name: nameController.text,
+                    price: double.parse(priceController.text),
+                  );
+                  Navigator.pop(context, newVariant);
+                }
+              },
+              child: const Text('Tambah'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   Future<void> _showDeleteConfirmation(
       LocalProduct product, dynamic productKey) async {
     if (!mounted) return;
@@ -205,8 +312,7 @@ class _ProductsPageState extends State<ProductsPage> {
 
     if (confirm == true) {
       try {
-        await _localDbService
-            .deleteProduct(productKey); // Gunakan key untuk hapus
+        await _localDbService.deleteProduct(productKey);
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text('${product.name} berhasil dihapus.'),
@@ -254,16 +360,13 @@ class _ProductsPageState extends State<ProductsPage> {
                 decoration: BoxDecoration(
                     color: const Color(0xFF1E1E1E).withOpacity(0.5),
                     borderRadius: BorderRadius.circular(12)),
-                // Gunakan ValueListenableBuilder untuk data Hive
                 child: ValueListenableBuilder<Box<LocalProduct>>(
                   valueListenable: _localDbService.getProductListenable(),
                   builder: (context, box, _) {
                     final products = box.values.toList().cast<LocalProduct>();
-
                     if (products.isEmpty) {
                       return const Center(child: Text('Belum ada produk.'));
                     }
-
                     return SingleChildScrollView(
                       scrollDirection: Axis.vertical,
                       child: SingleChildScrollView(
@@ -274,52 +377,46 @@ class _ProductsPageState extends State<ProductsPage> {
                               Colors.white.withOpacity(0.1)),
                           columns: const [
                             DataColumn(label: Text('Nama')),
-                            DataColumn(label: Text('Satuan')),
-                            DataColumn(
-                                label: Text('Harga Jual'), numeric: true),
-                            DataColumn(
-                                label: Text('Harga Beli'), numeric: true),
+                            DataColumn(label: Text('Harga Jual')),
+                            DataColumn(label: Text('Harga Beli')),
                             DataColumn(label: Text('Stok'), numeric: true),
+                            DataColumn(label: Text('Varian'), numeric: true),
                             DataColumn(label: Text('Aktif')),
                             DataColumn(label: Text('Aksi')),
                           ],
                           rows: products.map((product) {
-                            // Dapatkan key Hive untuk item ini
                             final productKey = product.key;
                             return DataRow(
                               cells: [
                                 DataCell(Text(product.name)),
-                                DataCell(Text(product.unit)),
-                                DataCell(Text(_currencyFormat
-                                    .format(product.sellingPrice))),
+                                DataCell(Text(product.hasVariants
+                                    ? 'Ada Varian'
+                                    : _currencyFormat
+                                        .format(product.sellingPrice))),
                                 DataCell(Text(_currencyFormat
                                     .format(product.purchasePrice))),
                                 DataCell(Text(product.stock.toString(),
                                     style: TextStyle(
                                         color: product.stock <= 5
                                             ? Colors.redAccent
-                                            : Colors.white,
-                                        fontWeight: product.stock <= 5
-                                            ? FontWeight.bold
-                                            : FontWeight.normal))),
+                                            : Colors.white))),
                                 DataCell(
-                                  Icon(
-                                    product.isActive
-                                        ? Icons.check_circle
-                                        : Icons.cancel,
-                                    color: product.isActive
-                                        ? Colors.greenAccent
-                                        : Colors.redAccent,
-                                  ),
-                                ),
+                                    Text(product.variants.length.toString())),
+                                DataCell(Icon(
+                                  product.isActive
+                                      ? Icons.check_circle
+                                      : Icons.cancel,
+                                  color: product.isActive
+                                      ? Colors.greenAccent
+                                      : Colors.redAccent,
+                                )),
                                 DataCell(
                                   Row(
                                     children: [
                                       ElevatedButton(
                                         onPressed: () => _showProductDialog(
                                             product: product,
-                                            productKey:
-                                                productKey), // Kirim key
+                                            productKey: productKey),
                                         style: ElevatedButton.styleFrom(
                                             backgroundColor: Colors.amber,
                                             foregroundColor: Colors.black,
@@ -330,14 +427,14 @@ class _ProductsPageState extends State<ProductsPage> {
                                       const SizedBox(width: 8),
                                       ElevatedButton(
                                         onPressed: () =>
-                                            _showDeleteConfirmation(product,
-                                                productKey), // Kirim key
+                                            _showDeleteConfirmation(
+                                                product, productKey),
                                         style: ElevatedButton.styleFrom(
                                             backgroundColor: Colors.redAccent,
                                             foregroundColor: Colors.white,
                                             padding: const EdgeInsets.symmetric(
                                                 horizontal: 12)),
-                                        child: const Text('Delete'),
+                                        child: const Text('Hapus'),
                                       ),
                                     ],
                                   ),

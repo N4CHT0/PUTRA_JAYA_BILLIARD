@@ -1,20 +1,31 @@
-// lib/models/cart_item_model.dart
-import 'package:putra_jaya_billiard/models/local_product.dart'; // PASTIKAN IMPORT INI
+import 'package:putra_jaya_billiard/models/local_product.dart';
+import 'package:putra_jaya_billiard/models/product_variant.dart'; // 1. Impor model varian
 
 class CartItem {
-  final LocalProduct product; // PASTIKAN TIPE INI
+  final LocalProduct product;
   int quantity;
 
-  CartItem(
-      {required this.product, // PASTIKAN MENERIMA LocalProduct
-      this.quantity = 1});
+  // 2. Tambahkan field untuk varian dan catatan
+  ProductVariant? selectedVariant;
+  String? note;
 
+  CartItem({
+    required this.product,
+    this.quantity = 1,
+    this.selectedVariant, // 3. Tambahkan di constructor
+    this.note, // 3. Tambahkan di constructor
+  });
+
+  // 4. Perbarui method untuk menyertakan data baru saat disimpan
   Map<String, dynamic> toMapForTransaction() {
     return {
       'productId': product.key.toString(),
       'productName': product.name,
       'quantity': quantity,
-      'price': product.sellingPrice,
+      // Gunakan harga varian jika ada, jika tidak, gunakan harga dasar produk
+      'price': selectedVariant?.price ?? product.sellingPrice,
+      'variantName': selectedVariant?.name, // Simpan nama varian
+      'note': note, // Simpan catatan
     };
   }
 }

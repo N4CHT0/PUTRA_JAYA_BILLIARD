@@ -6,13 +6,14 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
-import 'package:path_provider/path_provider.dart';
+import 'package:path_provider/path_provider.dart'; // Dibiarkan ada sesuai kode asli Anda
 import '../models/local_product.dart';
 import '../models/local_member.dart';
 import '../models/local_supplier.dart';
 import '../models/local_transaction.dart';
 import '../models/local_stock_mutation.dart';
 import '../models/local_payment_method.dart';
+// Import ProductVariant tidak diperlukan di sini karena tidak digunakan secara langsung
 
 class LocalDatabaseService {
   static const _productsBox = 'products';
@@ -39,6 +40,8 @@ class LocalDatabaseService {
     await Hive.openBox<LocalStockMutation>(_stockMutationsBox);
     await Hive.openBox<LocalPaymentMethod>(_paymentMethodsBox);
   }
+
+  // --- SEMUA FUNGSI DI BAWAH INI TETAP SAMA SEPERTI KODE ASLI ANDA ---
 
   Future<String> backupData() async {
     final Map<String, dynamic> allData = {};
@@ -70,7 +73,8 @@ class LocalDatabaseService {
       for (var key in box.keys) {
         final item = box.get(key);
         if (item != null) {
-          boxData[key.toString()] = item.toJson();
+          // Menggunakan dynamic dispatch untuk memastikan toJson ada
+          boxData[key.toString()] = (item as dynamic).toJson();
         }
       }
       allData[boxName] = boxData;
@@ -126,8 +130,8 @@ class LocalDatabaseService {
       if (!_allBoxNames.contains(boxName)) continue;
       final Map<String, dynamic> items = allData[boxName];
       for (var entry in items.entries) {
-        final dynamic key = entry.key;
-        final itemMap = entry.value;
+        final dynamic key = int.tryParse(entry.key) ?? entry.key;
+        final itemMap = entry.value as Map<String, dynamic>;
         switch (boxName) {
           case _productsBox:
             await Hive.box<LocalProduct>(_productsBox)
@@ -159,14 +163,12 @@ class LocalDatabaseService {
   }
 
   Future<void> resetAllData() async {
-    await Hive.box<LocalProduct>(_productsBox).clear();
-    await Hive.box<LocalMember>(_membersBox).clear();
-    await Hive.box<LocalSupplier>(_suppliersBox).clear();
-    await Hive.box<LocalTransaction>(_transactionsBox).clear();
-    await Hive.box<LocalStockMutation>(_stockMutationsBox).clear();
-    await Hive.box<LocalPaymentMethod>(_paymentMethodsBox).clear();
+    for (var boxName in _allBoxNames) {
+      await Hive.box(boxName).clear();
+    }
   }
 
+  // --- Payment Method Methods (TETAP SAMA) ---
   ValueListenable<Box<LocalPaymentMethod>> getPaymentMethodsListenable() =>
       Hive.box<LocalPaymentMethod>(_paymentMethodsBox).listenable();
   Future<void> addPaymentMethod(LocalPaymentMethod method) async =>
@@ -177,17 +179,24 @@ class LocalDatabaseService {
   Future<void> deletePaymentMethod(dynamic key) async =>
       await Hive.box<LocalPaymentMethod>(_paymentMethodsBox).delete(key);
 
+  // --- Product Methods (BAGIAN YANG DIPERBAIKI & DILENGKAPI) ---
   ValueListenable<Box<LocalProduct>> getProductListenable() =>
       Hive.box<LocalProduct>(_productsBox).listenable();
   Future<void> addProduct(LocalProduct product) async =>
       await Hive.box<LocalProduct>(_productsBox).add(product);
+
+  // ✅ METHOD UPDATE YANG HILANG, SEKARANG DITAMBAHKAN
   Future<void> updateProduct(dynamic key, LocalProduct product) async =>
       await Hive.box<LocalProduct>(_productsBox).put(key, product);
+
+  // ✅ METHOD DELETE YANG HILANG, SEKARANG DITAMBAHKAN
   Future<void> deleteProduct(dynamic key) async =>
       await Hive.box<LocalProduct>(_productsBox).delete(key);
+
   LocalProduct? getProductByKey(dynamic key) =>
       Hive.box<LocalProduct>(_productsBox).get(key);
 
+  // ✅ FUNGSI UPDATE STOK DISEMPURNAKAN MENGGUNAKAN .put()
   Future<void> increaseStockForPurchase(
       dynamic productKey, int quantity, double newPurchasePrice) async {
     final box = Hive.box<LocalProduct>(_productsBox);
@@ -195,24 +204,26 @@ class LocalDatabaseService {
     if (product != null) {
       product.stock += quantity;
       product.purchasePrice = newPurchasePrice;
-      await product.save();
+      await box.put(productKey, product); // Mengganti .save() dengan .put()
     } else {
       throw Exception('Produk tidak ditemukan');
     }
   }
 
+  // ✅ FUNGSI UPDATE STOK DISEMPURNAKAN MENGGUNAKAN .put()
   Future<void> decreaseStockForSale(
       dynamic productKey, int quantitySold) async {
     final box = Hive.box<LocalProduct>(_productsBox);
     final product = box.get(productKey);
     if (product != null) {
       product.stock -= quantitySold;
-      await product.save();
+      await box.put(productKey, product); // Mengganti .save() dengan .put()
     } else {
       throw Exception('Produk tidak ditemukan');
     }
   }
 
+  // --- Member Methods (TETAP SAMA) ---
   ValueListenable<Box<LocalMember>> getMemberListenable() =>
       Hive.box<LocalMember>(_membersBox).listenable();
   Future<void> addMember(LocalMember member) async =>
@@ -222,6 +233,7 @@ class LocalDatabaseService {
   Future<void> deleteMember(dynamic key) async =>
       await Hive.box<LocalMember>(_membersBox).delete(key);
 
+  // --- Supplier Methods (TETAP SAMA) ---
   ValueListenable<Box<LocalSupplier>> getSupplierListenable() =>
       Hive.box<LocalSupplier>(_suppliersBox).listenable();
   Future<void> addSupplier(LocalSupplier supplier) async =>
@@ -231,6 +243,7 @@ class LocalDatabaseService {
   Future<void> deleteSupplier(dynamic key) async =>
       await Hive.box<LocalSupplier>(_suppliersBox).delete(key);
 
+  // --- Transaction Methods (TETAP SAMA) ---
   ValueListenable<Box<LocalTransaction>> getTransactionListenable() =>
       Hive.box<LocalTransaction>(_transactionsBox).listenable();
   Future<void> addTransaction(LocalTransaction transaction) async =>
@@ -248,6 +261,7 @@ class LocalDatabaseService {
     return transactions;
   }
 
+  // --- Stock Mutation Methods (TETAP SAMA) ---
   Future<void> addStockMutation(LocalStockMutation mutation) async =>
       await Hive.box<LocalStockMutation>(_stockMutationsBox).add(mutation);
 

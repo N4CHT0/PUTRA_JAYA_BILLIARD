@@ -1,14 +1,12 @@
-// lib/models/local_product.dart
 import 'package:hive/hive.dart';
+import 'product_variant.dart'; // 1. Impor model baru
 
-part 'local_product.g.dart'; // File ini akan digenerate
+part 'local_product.g.dart';
 
-@HiveType(typeId: 1) // ID Tipe harus unik per model
+@HiveType(typeId: 1)
 class LocalProduct extends HiveObject {
-  // Wajib extend HiveObject
-
-  @HiveField(0) // Index field unik per model
-  String? id; // ID bisa dibuat manual atau otomatis oleh Hive
+  @HiveField(0)
+  String? id;
 
   @HiveField(1)
   String name;
@@ -20,7 +18,7 @@ class LocalProduct extends HiveObject {
   double purchasePrice;
 
   @HiveField(4)
-  double sellingPrice;
+  double sellingPrice; // Anggap ini sebagai harga dasar jika tidak ada varian
 
   @HiveField(5)
   int stock;
@@ -28,18 +26,25 @@ class LocalProduct extends HiveObject {
   @HiveField(6)
   bool isActive;
 
-  // Constructor
+  // 2. Tambahkan field baru untuk varian
+  @HiveField(7)
+  List<ProductVariant> variants;
+
   LocalProduct({
-    this.id, // ID bisa jadi opsional jika key di-handle Hive
+    this.id,
     required this.name,
     required this.unit,
     required this.purchasePrice,
     required this.sellingPrice,
     required this.stock,
     this.isActive = true,
+    this.variants = const [], // 3. Tambahkan di constructor
   });
 
-  // Method untuk mengubah objek menjadi Map (JSON)
+  // 4. Getter untuk kemudahan pengecekan
+  bool get hasVariants => variants.isNotEmpty;
+
+  // 5. Perbarui method toJson dan fromJson
   Map<String, dynamic> toJson() => {
         'id': id,
         'name': name,
@@ -48,16 +53,21 @@ class LocalProduct extends HiveObject {
         'sellingPrice': sellingPrice,
         'stock': stock,
         'isActive': isActive,
+        'variants': variants.map((v) => v.toJson()).toList(), // Sertakan varian
       };
 
-  // Factory constructor untuk membuat objek dari Map (JSON)
   factory LocalProduct.fromJson(Map<String, dynamic> json) => LocalProduct(
         id: json['id'],
         name: json['name'],
         unit: json['unit'],
-        purchasePrice: json['purchasePrice'],
-        sellingPrice: json['sellingPrice'],
+        purchasePrice: (json['purchasePrice'] as num).toDouble(),
+        sellingPrice: (json['sellingPrice'] as num).toDouble(),
         stock: json['stock'],
         isActive: json['isActive'],
+        // Ambil data varian dari JSON, jika tidak ada, gunakan list kosong
+        variants: (json['variants'] as List<dynamic>?)
+                ?.map((v) => ProductVariant.fromJson(v as Map<String, dynamic>))
+                .toList() ??
+            [],
       );
 }

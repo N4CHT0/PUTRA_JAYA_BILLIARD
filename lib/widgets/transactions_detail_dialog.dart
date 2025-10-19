@@ -1,11 +1,8 @@
-// lib/widgets/transaction_detail_dialog.dart
-
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import '../models/local_transaction.dart'; // Import model LocalTransaction
+import '../models/local_transaction.dart';
 
 class TransactionDetailDialog extends StatelessWidget {
-  // Terima objek LocalTransaction, bukan Map
   final LocalTransaction transaction;
 
   const TransactionDetailDialog({super.key, required this.transaction});
@@ -14,7 +11,6 @@ class TransactionDetailDialog extends StatelessWidget {
   Widget build(BuildContext context) {
     final formatter =
         NumberFormat.currency(locale: 'id_ID', symbol: 'Rp ', decimalDigits: 0);
-    // Ambil tipe langsung dari properti objek
     final type = transaction.type;
 
     return AlertDialog(
@@ -46,10 +42,48 @@ class TransactionDetailDialog extends StatelessWidget {
     }
   }
 
+  // --- BAGIAN YANG DIPERBARUI UNTUK MENAMPILKAN VARIAN & CATATAN ---
+  Widget _buildItemDetails(Map<String, dynamic> item, NumberFormat formatter) {
+    // 1. Bangun nama produk lengkap dengan varian
+    String productName = item['productName'] ?? 'Nama Produk Tidak Ada';
+    final String? variantName = item['variantName'];
+    if (variantName != null && variantName.isNotEmpty) {
+      productName += ' ($variantName)';
+    }
+
+    // 2. Siapkan widget untuk catatan (jika ada)
+    final String? note = item['note'];
+    Widget? noteWidget;
+    if (note != null && note.isNotEmpty) {
+      noteWidget = Padding(
+        padding: const EdgeInsets.only(left: 16.0, top: 2.0),
+        child: Text(
+          'Catatan: $note',
+          style: const TextStyle(
+              fontSize: 12, fontStyle: FontStyle.italic, color: Colors.grey),
+        ),
+      );
+    }
+
+    // 3. Gabungkan semuanya dalam satu Column
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+              '- ${item['quantity']}x $productName @ ${formatter.format(item['price'])}'),
+          if (noteWidget != null) noteWidget,
+        ],
+      ),
+    );
+  }
+
   Widget _buildBilliardDetails(NumberFormat formatter) {
     final startTime = transaction.startTime;
     final endTime = transaction.endTime;
     final duration = Duration(seconds: transaction.durationInSeconds ?? 0);
+    final items = transaction.items ?? [];
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -73,10 +107,15 @@ class TransactionDetailDialog extends StatelessWidget {
                 : 'N/A'),
         _buildDetailRow('Durasi',
             "${duration.inHours}j ${duration.inMinutes.remainder(60)}m ${duration.inSeconds.remainder(60)}d"),
-
-        // ✅ PERUBAHAN DI SINI: Tampilkan Metode Pembayaran
         _buildDetailRow('Metode Bayar', transaction.paymentMethod ?? 'Cash'),
-
+        if (items.isNotEmpty) ...[
+          const Divider(height: 20, color: Colors.white24),
+          const Text('Pesanan Tambahan (F&B):',
+              style: TextStyle(fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          // Menggunakan helper widget yang baru
+          ...items.map((item) => _buildItemDetails(item, formatter)).toList(),
+        ],
         const Divider(height: 20, color: Colors.white24),
         _buildDetailRow('Total', formatter.format(transaction.totalAmount),
             isTotal: true),
@@ -101,25 +140,23 @@ class TransactionDetailDialog extends StatelessWidget {
         const Text('Daftar Item:',
             style: TextStyle(fontWeight: FontWeight.bold)),
         const SizedBox(height: 8),
-        ...items.map((item) {
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 4.0),
-            child: Text(
-                '- ${item['quantity']}x ${item['productName']} @ ${formatter.format(item['price'])}'),
-          );
-        }).toList(),
+        // Menggunakan helper widget yang baru
+        ...items.map((item) => _buildItemDetails(item, formatter)).toList(),
 
         const Divider(height: 20, color: Colors.white24),
-
-        // ✅ PERUBAHAN DI SINI: Tampilkan Metode Pembayaran
+        _buildDetailRow(
+            'Subtotal', formatter.format(transaction.subtotal ?? 0)),
+        if (transaction.discount != null && transaction.discount! > 0)
+          _buildDetailRow(
+              'Diskon', '- ${formatter.format(transaction.discount)}'),
         _buildDetailRow('Metode Bayar', transaction.paymentMethod ?? 'Cash'),
-
         _buildDetailRow('Total', formatter.format(transaction.totalAmount),
             isTotal: true),
       ],
     );
   }
 
+  // Method ini tidak diubah karena pembelian tidak memiliki varian/catatan
   Widget _buildPurchaseDetails(NumberFormat formatter) {
     final items = transaction.items ?? [];
     return Column(
@@ -142,12 +179,8 @@ class TransactionDetailDialog extends StatelessWidget {
                 '- ${item['quantity']}x ${item['productName']} @ ${formatter.format(item['purchasePrice'])}'),
           );
         }).toList(),
-
         const Divider(height: 20, color: Colors.white24),
-
-        // ✅ PERUBAHAN DI SINI: Tampilkan Metode Pembayaran
         _buildDetailRow('Metode Bayar', transaction.paymentMethod ?? 'Cash'),
-
         _buildDetailRow('Total', formatter.format(transaction.totalAmount),
             isTotal: true),
       ],

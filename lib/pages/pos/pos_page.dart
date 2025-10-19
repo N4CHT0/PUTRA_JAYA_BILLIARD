@@ -7,6 +7,7 @@ import 'package:putra_jaya_billiard/models/local_payment_method.dart';
 import 'package:putra_jaya_billiard/models/local_product.dart';
 import 'package:putra_jaya_billiard/models/local_stock_mutation.dart';
 import 'package:putra_jaya_billiard/models/local_transaction.dart';
+import 'package:putra_jaya_billiard/models/product_variant.dart';
 import 'package:putra_jaya_billiard/models/user_model.dart';
 import 'package:putra_jaya_billiard/services/local_database_service.dart';
 
@@ -34,27 +35,110 @@ class _PosPageState extends State<PosPage> {
   final NumberFormat _currencyFormat =
       NumberFormat.currency(locale: 'id_ID', symbol: 'Rp ', decimalDigits: 0);
 
-  void _addToCart(LocalProduct product) {
+  /// Menampilkan dialog untuk memilih varian produk dan menambahkan catatan.
+  Future<void> _showVariantSelectionDialog(LocalProduct product) async {
+    ProductVariant? selectedVariant =
+        product.variants.isNotEmpty ? product.variants.first : null;
+    final noteController = TextEditingController();
+
+    final result = await showDialog<CartItem>(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setStateInDialog) {
+            return AlertDialog(
+              backgroundColor: const Color(0xFF2c2c2c),
+              title: Text('Pilih Opsi untuk ${product.name}'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Varian:',
+                        style: TextStyle(fontWeight: FontWeight.bold)),
+                    ...product.variants.map((variant) {
+                      return RadioListTile<ProductVariant>(
+                        title: Text(variant.name),
+                        subtitle: Text(_currencyFormat.format(variant.price)),
+                        value: variant,
+                        groupValue: selectedVariant,
+                        onChanged: (value) {
+                          setStateInDialog(() => selectedVariant = value);
+                        },
+                        contentPadding: EdgeInsets.zero,
+                      );
+                    }).toList(),
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: noteController,
+                      decoration: const InputDecoration(
+                        labelText: 'Catatan (opsional)',
+                        hintText: 'Contoh: Gula 1 sendok',
+                        border: OutlineInputBorder(),
+                      ),
+                      textCapitalization: TextCapitalization.sentences,
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Batal')),
+                ElevatedButton(
+                  onPressed: selectedVariant == null
+                      ? null
+                      : () {
+                          final newItem = CartItem(
+                            product: product,
+                            selectedVariant: selectedVariant,
+                            note: noteController.text.trim().isNotEmpty
+                                ? noteController.text.trim()
+                                : null,
+                          );
+                          Navigator.pop(context, newItem);
+                        },
+                  child: const Text('Tambah'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    if (result != null) {
+      _handleAddToCart(result);
+    }
+  }
+
+  /// Mengelola penambahan item ke keranjang.
+  void _handleAddToCart(dynamic itemOrProduct) {
     setState(() {
-      final index = _cart.indexWhere(
-          (item) => (item.product as LocalProduct).key == product.key);
-      if (index != -1) {
-        if (_cart[index].quantity < product.stock) {
-          _cart[index].quantity++;
-        } else {
-          if (!mounted) return;
+      if (itemOrProduct is CartItem) {
+        _cart.add(itemOrProduct);
+      } else if (itemOrProduct is LocalProduct) {
+        final product = itemOrProduct;
+        if (product.stock <= 0) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Stok ${product.name} tidak mencukupi.')),
-          );
+              SnackBar(content: Text('Stok ${product.name} habis.')));
+          return;
         }
-      } else {
-        if (product.stock > 0) {
-          _cart.add(CartItem(product: product));
+
+        final index = _cart.indexWhere((item) =>
+            (item.product as LocalProduct).key == product.key &&
+            item.selectedVariant == null &&
+            item.note == null);
+
+        if (index != -1) {
+          if (_cart[index].quantity < product.stock) {
+            _cart[index].quantity++;
+          } else {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                content: Text('Stok ${product.name} tidak mencukupi.')));
+          }
         } else {
-          if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Stok ${product.name} habis.')),
-          );
+          _cart.add(CartItem(product: product));
         }
       }
     });
@@ -69,7 +153,6 @@ class _PosPageState extends State<PosPage> {
       } else if (newQuantity <= product.stock) {
         item.quantity = newQuantity;
       } else {
-        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Stok ${product.name} tidak mencukupi.')),
         );
@@ -78,11 +161,11 @@ class _PosPageState extends State<PosPage> {
   }
 
   double get _subtotal {
-    return _cart.fold(
-        0,
-        (sum, item) =>
-            sum +
-            ((item.product as LocalProduct).sellingPrice * item.quantity));
+    return _cart.fold(0, (sum, item) {
+      final price = item.selectedVariant?.price ??
+          (item.product as LocalProduct).sellingPrice;
+      return sum + (price * item.quantity);
+    });
   }
 
   double get _discountAmount {
@@ -129,9 +212,7 @@ class _PosPageState extends State<PosPage> {
                 final tableId = activeTables[index];
                 return ListTile(
                   title: Text('Meja $tableId'),
-                  onTap: () {
-                    Navigator.of(context).pop(tableId);
-                  },
+                  onTap: () => Navigator.of(context).pop(tableId),
                 );
               },
             ),
@@ -166,15 +247,14 @@ class _PosPageState extends State<PosPage> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) {
-        return StatefulBuilder(
-          builder: (context, setStateInDialog) {
-            return AlertDialog(
-              backgroundColor: const Color(0xFF2c2c2c),
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12)),
-              title: const Text('Konfirmasi Transaksi'),
-              content: SingleChildScrollView(
-                child: Column(
+        return StatefulBuilder(builder: (context, setStateInDialog) {
+          return AlertDialog(
+            backgroundColor: const Color(0xFF2c2c2c),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            title: const Text('Konfirmasi Transaksi'),
+            content: SingleChildScrollView(
+              child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -191,50 +271,46 @@ class _PosPageState extends State<PosPage> {
                     const Text('Metode Pembayaran:',
                         style: TextStyle(fontSize: 12, color: Colors.grey)),
                     ValueListenableBuilder<Box<LocalPaymentMethod>>(
-                      valueListenable:
-                          _localDbService.getPaymentMethodsListenable(),
-                      builder: (context, box, _) {
-                        final paymentMethods = box.values
-                            .where((p) => p.isActive)
-                            .map((p) => p.name)
-                            .toList();
-                        final allOptions = {'Cash', ...paymentMethods}.toList();
-
-                        return DropdownButton<String>(
-                          value: selectedPaymentMethod,
-                          isExpanded: true,
-                          underline:
-                              Container(height: 1, color: Colors.white24),
-                          dropdownColor: const Color(0xFF2c2c2c),
-                          items: allOptions.map((String value) {
-                            return DropdownMenuItem<String>(
-                                value: value, child: Text(value));
-                          }).toList(),
-                          onChanged: (String? newValue) {
-                            if (newValue != null) {
-                              setStateInDialog(
-                                  () => selectedPaymentMethod = newValue);
-                            }
-                          },
-                        );
-                      },
-                    ),
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                    onPressed: () => Navigator.pop(ctx, false),
-                    child: const Text('Batal')),
-                ElevatedButton(
+                        valueListenable:
+                            _localDbService.getPaymentMethodsListenable(),
+                        builder: (context, box, _) {
+                          final paymentMethods = box.values
+                              .where((p) => p.isActive)
+                              .map((p) => p.name)
+                              .toList();
+                          final allOptions =
+                              {'Cash', ...paymentMethods}.toList();
+                          return DropdownButton<String>(
+                            value: selectedPaymentMethod,
+                            isExpanded: true,
+                            underline:
+                                Container(height: 1, color: Colors.white24),
+                            dropdownColor: const Color(0xFF2c2c2c),
+                            items: allOptions.map((String value) {
+                              return DropdownMenuItem<String>(
+                                  value: value, child: Text(value));
+                            }).toList(),
+                            onChanged: (String? newValue) {
+                              if (newValue != null) {
+                                setStateInDialog(
+                                    () => selectedPaymentMethod = newValue);
+                              }
+                            },
+                          );
+                        })
+                  ]),
+            ),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('Batal')),
+              ElevatedButton(
                   style: ElevatedButton.styleFrom(backgroundColor: Colors.teal),
                   onPressed: () => Navigator.pop(ctx, true),
-                  child: const Text('Bayar'),
-                ),
-              ],
-            );
-          },
-        );
+                  child: const Text('Bayar')),
+            ],
+          );
+        });
       },
     );
 
@@ -260,7 +336,9 @@ class _PosPageState extends State<PosPage> {
               'productId': product.key.toString(),
               'productName': product.name,
               'quantity': item.quantity,
-              'price': product.sellingPrice,
+              'price': item.selectedVariant?.price ?? product.sellingPrice,
+              'variantName': item.selectedVariant?.name,
+              'note': item.note,
             };
           }).toList(),
         );
@@ -271,37 +349,30 @@ class _PosPageState extends State<PosPage> {
           final product = item.product as LocalProduct;
           final stockBefore = product.stock;
           final mutation = LocalStockMutation(
-            productId: product.key.toString(),
-            productName: product.name,
-            type: 'sale',
-            quantityChange: -item.quantity,
-            stockBefore: stockBefore,
-            notes: 'POS Transaksi',
-            date: now,
-            userId: widget.currentUser.uid,
-            userName: widget.currentUser.nama,
-          );
+              productId: product.key.toString(),
+              productName: product.name,
+              type: 'sale',
+              quantityChange: -item.quantity,
+              stockBefore: stockBefore,
+              notes: 'POS Transaksi',
+              date: now,
+              userId: widget.currentUser.uid,
+              userName: widget.currentUser.nama);
           await _localDbService.addStockMutation(mutation);
           await _localDbService.decreaseStockForSale(
               product.key, item.quantity);
         }
-
-        setState(() {
-          _cart.clear();
-          _selectedMember = null;
-        });
-
+        _clearCart();
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('Transaksi berhasil disimpan (Lokal)!'),
           backgroundColor: Colors.green,
         ));
       } catch (e, s) {
-        print('Error during checkout: $e');
-        print(s);
+        print('Error during checkout: $e\n$s');
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('Error: $e'),
+          content: Text('Terjadi error: $e'),
           backgroundColor: Colors.red,
         ));
       }
@@ -347,7 +418,6 @@ class _PosPageState extends State<PosPage> {
         builder: (context, box, _) {
           final products =
               box.values.where((p) => p.isActive).toList().cast<LocalProduct>();
-
           if (products.isEmpty) {
             return const Center(child: Text('Tidak ada produk aktif.'));
           }
@@ -364,7 +434,13 @@ class _PosPageState extends State<PosPage> {
             itemBuilder: (context, index) {
               final product = products[index];
               return InkWell(
-                onTap: () => _addToCart(product),
+                onTap: () {
+                  if (product.hasVariants) {
+                    _showVariantSelectionDialog(product);
+                  } else {
+                    _handleAddToCart(product);
+                  }
+                },
                 borderRadius: BorderRadius.circular(8),
                 child: Card(
                   color: const Color(0xFF2c2c2c),
@@ -387,7 +463,12 @@ class _PosPageState extends State<PosPage> {
                                         ? Colors.redAccent
                                         : Colors.grey[400],
                                     fontSize: 12)),
-                            Text(_currencyFormat.format(product.sellingPrice),
+                            Text(
+                                product.hasVariants &&
+                                        product.variants.isNotEmpty
+                                    ? 'Mulai dari ${_currencyFormat.format(product.variants.first.price)}'
+                                    : _currencyFormat
+                                        .format(product.sellingPrice),
                                 style:
                                     const TextStyle(color: Colors.cyanAccent)),
                           ],
@@ -430,9 +511,7 @@ class _PosPageState extends State<PosPage> {
           final members = box.values.toList().cast<LocalMember>();
           List<DropdownMenuItem<LocalMember?>> items = [
             const DropdownMenuItem<LocalMember?>(
-              value: null,
-              child: Text('Pelanggan Umum'),
-            ),
+                value: null, child: Text('Pelanggan Umum')),
             ...members.where((m) => m.isActive).map((member) {
               return DropdownMenuItem<LocalMember?>(
                 value: member,
@@ -440,7 +519,6 @@ class _PosPageState extends State<PosPage> {
               );
             }).toList(),
           ];
-
           return DropdownButton<LocalMember?>(
             value: _selectedMember,
             hint: const Text('Pilih Member (Opsional)'),
@@ -479,12 +557,36 @@ class _PosPageState extends State<PosPage> {
                     itemBuilder: (context, index) {
                       final item = _cart[index];
                       final product = item.product as LocalProduct;
+                      final price =
+                          item.selectedVariant?.price ?? product.sellingPrice;
+
+                      String title = product.name;
+                      if (item.selectedVariant != null) {
+                        title += ' (${item.selectedVariant!.name})';
+                      }
+
+                      List<Widget> subtitleWidgets = [
+                        Text(_currencyFormat.format(price * item.quantity))
+                      ];
+                      if (item.note != null && item.note!.isNotEmpty) {
+                        subtitleWidgets.add(Padding(
+                          padding: const EdgeInsets.only(top: 2.0),
+                          child: Text('Catatan: ${item.note!}',
+                              style: const TextStyle(
+                                  fontSize: 12,
+                                  fontStyle: FontStyle.italic,
+                                  color: Colors.grey)),
+                        ));
+                      }
+
                       return ListTile(
                         dense: true,
                         contentPadding: EdgeInsets.zero,
-                        title: Text(product.name),
-                        subtitle: Text(_currencyFormat
-                            .format(product.sellingPrice * item.quantity)),
+                        title: Text(title),
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: subtitleWidgets,
+                        ),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [

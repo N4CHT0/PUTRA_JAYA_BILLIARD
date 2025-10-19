@@ -2,6 +2,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:putra_jaya_billiard/models/product_variant.dart';
 import 'firebase_options.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:path_provider/path_provider.dart';
@@ -34,6 +35,7 @@ void main() async {
   Hive.registerAdapter(LocalTransactionAdapter());
   Hive.registerAdapter(LocalStockMutationAdapter());
   Hive.registerAdapter(LocalPaymentMethodAdapter()); // ✅ DAFTARKAN ADAPTER BARU
+  Hive.registerAdapter(ProductVariantAdapter());
 
   // --- 3. Panggil Service untuk Membuka Semua Box ---
   // Ini lebih rapi daripada membuka box satu per satu di sini.
