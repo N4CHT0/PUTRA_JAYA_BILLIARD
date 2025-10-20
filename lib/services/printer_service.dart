@@ -99,38 +99,24 @@ class PrinterService with ChangeNotifier {
     }
   }
 
-  /// Contoh fungsi untuk mencetak struk sederhana.
-  /// Anda dapat memodifikasi ini sesuai dengan format struk yang diinginkan.
-  Future<void> printTestReceipt() async {
+  // FUNGSI BARU: Untuk Test Print
+  Future<void> printTestPage() async {
     if (!_isConnected) {
       print("Tidak bisa mencetak, printer tidak terhubung.");
       return;
     }
 
-    // Contoh perintah ESC/POS
     List<int> commands = [];
-    // Reset printer
-    commands.addAll([0x1B, 0x40]);
-    // Set alignment ke tengah
-    commands.addAll([0x1B, 0x61, 1]);
-    // Set teks tebal
-    commands.addAll([0x1B, 0x45, 1]);
+    commands.addAll([0x1B, 0x40]); // Reset
+    commands.addAll([0x1B, 0x61, 1]); // Align Center
+    commands.addAll('Test Cetak Berhasil\n'.codeUnits);
     commands.addAll('Putra Jaya Billiard\n'.codeUnits);
-    // Matikan teks tebal
-    commands.addAll([0x1B, 0x45, 0]);
-    commands.addAll('--------------------------------\n'.codeUnits);
-    // Set alignment ke kiri
-    commands.addAll([0x1B, 0x61, 0]);
-    commands.addAll('Item         Qty    Total\n'.codeUnits);
-    commands.addAll('--------------------------------\n'.codeUnits);
-    commands.addAll('Aqua Botol     1    Rp 5,000\n'.codeUnits);
-    commands.addAll('Snack          2    Rp 10,000\n'.codeUnits);
-    commands.addAll('\n\n'.codeUnits);
-    // Set alignment ke tengah lagi
-    commands.addAll([0x1B, 0x61, 1]);
-    commands.addAll('Terima Kasih!\n'.codeUnits);
-    // Cut paper (jika printer mendukung)
-    commands.addAll([0x1D, 0x56, 1]);
+    commands.addAll('================================\n'.codeUnits);
+    commands.addAll([0x1B, 0x61, 0]); // Align Left
+    commands.addAll('Koneksi printer OK.\n'.codeUnits);
+    commands.addAll('Baud Rate: 9600\n'.codeUnits);
+    commands.addAll('\n\n\n'.codeUnits);
+    commands.addAll([0x1D, 0x56, 66, 0]); // Partial Cut
 
     await sendRawData(Uint8List.fromList(commands));
   }

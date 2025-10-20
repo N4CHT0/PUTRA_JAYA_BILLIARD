@@ -1,3 +1,5 @@
+// lib/pages/dashboard/dashboard_page.dart
+
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
@@ -5,14 +7,16 @@ import 'package:intl/intl.dart' as intl;
 import 'package:putra_jaya_billiard/models/cart_item_model.dart';
 import 'package:putra_jaya_billiard/models/local_member.dart';
 import 'package:putra_jaya_billiard/models/local_payment_method.dart';
+import 'package:putra_jaya_billiard/models/local_product.dart';
 import 'package:putra_jaya_billiard/models/local_transaction.dart';
 import 'package:putra_jaya_billiard/models/relay_data.dart';
 import 'package:putra_jaya_billiard/models/user_model.dart';
 import 'package:putra_jaya_billiard/pages/connection/connection_page.dart';
 import 'package:putra_jaya_billiard/services/arduino_service.dart';
-import 'package:putra_jaya_billiard/services/printer_service.dart';
 import 'package:putra_jaya_billiard/services/billing_services.dart';
 import 'package:putra_jaya_billiard/services/local_database_service.dart';
+import 'package:putra_jaya_billiard/services/printer_service.dart';
+import 'package:putra_jaya_billiard/services/receipt_builder.dart';
 import 'package:sliding_up_panel/sliding_up_panel.dart';
 import 'widgets/billiard_table_card.dart';
 import 'widgets/log_panel.dart';
@@ -22,14 +26,13 @@ const int numRelays = 32;
 class DashboardPage extends StatefulWidget {
   final UserModel user;
   final ArduinoService arduinoService;
-  // Tambahkan service untuk printer
   final PrinterService printerService;
 
   const DashboardPage({
     super.key,
     required this.user,
     required this.arduinoService,
-    required this.printerService, // Jadikan required
+    required this.printerService,
   });
 
   @override
@@ -52,8 +55,6 @@ class DashboardPageState extends State<DashboardPage> {
     _startLogicTimer();
     _loadRates();
     widget.arduinoService.onDataReceived = (data) => _addLog('Arduino: $data');
-    // Dengarkan perubahan koneksi pada kedua service
-    // agar UI (AppBar icon) dapat diperbarui
     widget.arduinoService.onConnectionChanged = () {
       if (mounted) setState(() {});
     };
@@ -64,7 +65,6 @@ class DashboardPageState extends State<DashboardPage> {
 
   @override
   void dispose() {
-    // Hapus listener saat widget di-dispose
     widget.arduinoService.onConnectionChanged = null;
     widget.printerService.onConnectionChanged = null;
     _logicTimer?.cancel();
@@ -72,12 +72,10 @@ class DashboardPageState extends State<DashboardPage> {
     super.dispose();
   }
 
-  // Method publik untuk menerima item dari PosPage
   void addToCartToTable(int tableId, List<CartItem> items) {
     setState(() {
       final relay = _relayStates[tableId];
       if (relay != null && _activeSessions.containsKey(tableId)) {
-        // Buat list baru agar Flutter mendeteksi perubahan
         relay.posItems = List<CartItem>.from(relay.posItems)..addAll(items);
         _addLog('${items.length} item F&B ditambahkan ke Meja $tableId.');
       } else {
@@ -87,7 +85,6 @@ class DashboardPageState extends State<DashboardPage> {
     });
   }
 
-  // Method publik untuk mendapatkan ID meja yang aktif
   List<int> getActiveTableIds() {
     return _activeSessions.keys.toList()..sort();
   }
@@ -190,7 +187,7 @@ class DashboardPageState extends State<DashboardPage> {
 
     final localTransaction = LocalTransaction(
       flow: 'income',
-      type: 'billiard', // Tipe utama tetap billiard
+      type: 'billiard',
       totalAmount: finalTotal,
       createdAt: startTime,
       cashierId: widget.user.uid,
@@ -210,7 +207,9 @@ class DashboardPageState extends State<DashboardPage> {
           'productId': product.key.toString(),
           'productName': product.name,
           'quantity': item.quantity,
-          'price': product.sellingPrice,
+          'price': item.selectedVariant?.price ?? product.sellingPrice,
+          'variantName': item.selectedVariant?.name,
+          'note': item.note,
         };
       }).toList(),
     );
@@ -218,6 +217,21 @@ class DashboardPageState extends State<DashboardPage> {
     try {
       await _localDbService.addTransaction(localTransaction);
       _addLog('Transaksi Meja $mejaId berhasil disimpan (Lokal).');
+
+      if (widget.printerService.isConnected) {
+        final customerReceipt = ReceiptBuilder.buildBilliardReceipt(
+            localTransaction, ReceiptType.customer);
+        await widget.printerService.sendRawData(customerReceipt);
+
+        final cashierReceipt = ReceiptBuilder.buildBilliardReceipt(
+            localTransaction, ReceiptType.cashier);
+        await widget.printerService.sendRawData(cashierReceipt);
+
+        _addLog('Nota Meja $mejaId berhasil dicetak.');
+      } else {
+        _addLog(
+            'ERROR: Gagal cetak nota Meja $mejaId, printer tidak terhubung.');
+      }
     } catch (e) {
       _addLog('ERROR: Gagal menyimpan transaksi Meja $mejaId (Lokal): $e');
       if (mounted) {
@@ -318,7 +332,10 @@ class DashboardPageState extends State<DashboardPage> {
             final double posSubtotal = relay.posItems.fold(
                 0,
                 (sum, item) =>
-                    sum + ((item.product).sellingPrice * item.quantity));
+                    sum +
+                    ((item.selectedVariant?.price ??
+                            item.product.sellingPrice) *
+                        item.quantity));
             final grandSubtotal = billiardSubtotal + posSubtotal;
             final discountPercentage =
                 selectedMemberInDialog?.discountPercentage ?? 0;
@@ -359,7 +376,9 @@ class DashboardPageState extends State<DashboardPage> {
                           contentPadding: EdgeInsets.zero,
                           title: Text('${item.quantity}x ${product.name}'),
                           trailing: Text(_formatCurrency(
-                              product.sellingPrice * item.quantity)),
+                              (item.selectedVariant?.price ??
+                                      product.sellingPrice) *
+                                  item.quantity)),
                         );
                       }),
                     ],
@@ -584,14 +603,13 @@ class DashboardPageState extends State<DashboardPage> {
     );
   }
 
-  // Perbarui fungsi navigasi untuk membawa kedua service
   void _navigateToConnectionPage() {
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => ConnectionPage(
           arduinoService: widget.arduinoService,
-          printerService: widget.printerService, // Kirim printer service juga
+          printerService: widget.printerService,
         ),
       ),
     );
@@ -608,7 +626,6 @@ class DashboardPageState extends State<DashboardPage> {
       onClearLog: () => setState(() => _logMessages = ''),
     );
 
-    // Dapatkan status koneksi panel (Arduino)
     final bool isPanelConnected = widget.arduinoService.isConnected;
 
     return Scaffold(
@@ -619,13 +636,11 @@ class DashboardPageState extends State<DashboardPage> {
         actions: [
           Tooltip(
             key: const ValueKey('connection_tooltip'),
-            // Pesan tooltip mencakup kedua koneksi
             message:
                 'Panel: ${isPanelConnected ? 'Terhubung' : 'Tidak Terhubung'}\nKlik untuk mengatur koneksi.',
             child: IconButton(
               icon: Icon(
                 Icons.usb,
-                // Warna merah jika panel tidak terhubung, sesuai permintaan
                 color: isPanelConnected ? Colors.greenAccent : Colors.redAccent,
               ),
               onPressed: _navigateToConnectionPage,

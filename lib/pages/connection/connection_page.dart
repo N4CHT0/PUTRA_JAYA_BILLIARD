@@ -61,7 +61,6 @@ class _ConnectionPageState extends State<ConnectionPage> {
       SnackBar(content: Text('Menyambungkan ke $portName...')),
     );
 
-    // FIX: Gunakan tipe dynamic agar bisa memanggil method connect dari kedua service
     final dynamic service =
         isPrinter ? widget.printerService : widget.arduinoService;
 
@@ -103,7 +102,6 @@ class _ConnectionPageState extends State<ConnectionPage> {
   }
 
   Future<void> _disconnect({required bool isPrinter}) async {
-    // FIX: Gunakan tipe dynamic agar bisa memanggil method disconnect dari kedua service
     final dynamic service =
         isPrinter ? widget.printerService : widget.arduinoService;
     await service.disconnect();
@@ -134,7 +132,6 @@ class _ConnectionPageState extends State<ConnectionPage> {
         padding: const EdgeInsets.all(16.0),
         child: ListView(
           children: [
-            // Widget untuk Panel USB
             _buildConnectionCard(
               title: 'Panel USB',
               subtitle: '(Arduino Kontrol Meja)',
@@ -144,7 +141,6 @@ class _ConnectionPageState extends State<ConnectionPage> {
               onDisconnect: () => _disconnect(isPrinter: false),
             ),
             const SizedBox(height: 24),
-            // Widget untuk Printer USB
             _buildConnectionCard(
               title: 'Printer USB',
               subtitle: '(Struk & Laporan)',
@@ -152,6 +148,12 @@ class _ConnectionPageState extends State<ConnectionPage> {
               isLoading: _isLoadingPrinter,
               onConnect: (port) => _connect(port, isPrinter: true),
               onDisconnect: () => _disconnect(isPrinter: true),
+              onTestPrint: () async {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Mengirim perintah cetak...')),
+                );
+                await widget.printerService.printTestPage();
+              },
             ),
           ],
         ),
@@ -162,11 +164,11 @@ class _ConnectionPageState extends State<ConnectionPage> {
   Widget _buildConnectionCard({
     required String title,
     required String subtitle,
-    // FIX: Ubah tipe dari ArduinoService menjadi dynamic
     required dynamic service,
     required bool isLoading,
     required Future<void> Function(String) onConnect,
     required Future<void> Function() onDisconnect,
+    Future<void> Function()? onTestPrint,
   }) {
     final isConnected = service.isConnected;
     return Card(
@@ -177,14 +179,12 @@ class _ConnectionPageState extends State<ConnectionPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Header
             Text(title,
                 style:
                     const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
             Text(subtitle,
                 style: const TextStyle(fontSize: 12, color: Colors.grey)),
             const Divider(height: 24),
-            // Status Koneksi
             Row(
               children: [
                 Icon(
@@ -203,7 +203,6 @@ class _ConnectionPageState extends State<ConnectionPage> {
               ],
             ),
             const SizedBox(height: 24),
-            // Aksi
             if (!isConnected) ...[
               if (_availablePorts.isEmpty)
                 const Center(
@@ -232,15 +231,32 @@ class _ConnectionPageState extends State<ConnectionPage> {
                 )),
             ],
             if (isConnected)
-              ElevatedButton.icon(
-                onPressed: onDisconnect,
-                icon: const Icon(Icons.close),
-                label: const Text('Putuskan Koneksi'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.redAccent,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (onTestPrint != null)
+                    ElevatedButton.icon(
+                      onPressed: onTestPrint,
+                      icon: const Icon(Icons.print_outlined),
+                      label: const Text('Test Cetak'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.blueAccent,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                    ),
+                  if (onTestPrint != null) const SizedBox(height: 8),
+                  ElevatedButton.icon(
+                    onPressed: onDisconnect,
+                    icon: const Icon(Icons.close),
+                    label: const Text('Putuskan Koneksi'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.redAccent,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                    ),
+                  ),
+                ],
               ),
           ],
         ),

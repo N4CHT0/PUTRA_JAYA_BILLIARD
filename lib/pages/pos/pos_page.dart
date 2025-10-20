@@ -1,3 +1,5 @@
+// lib/pages/pos/pos_page.dart
+
 import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
@@ -9,16 +11,16 @@ import 'package:putra_jaya_billiard/models/local_stock_mutation.dart';
 import 'package:putra_jaya_billiard/models/local_transaction.dart';
 import 'package:putra_jaya_billiard/models/product_variant.dart';
 import 'package:putra_jaya_billiard/models/user_model.dart';
-import 'package:putra_jaya_billiard/pages/connection/connection_page.dart'; // Import ConnectionPage
-import 'package:putra_jaya_billiard/services/arduino_service.dart'; // Import ArduinoService
-import 'package:putra_jaya_billiard/services/printer_service.dart'; // Import PrinterService
+import 'package:putra_jaya_billiard/pages/connection/connection_page.dart';
+import 'package:putra_jaya_billiard/services/arduino_service.dart';
 import 'package:putra_jaya_billiard/services/local_database_service.dart';
+import 'package:putra_jaya_billiard/services/printer_service.dart';
+import 'package:putra_jaya_billiard/services/receipt_builder.dart';
 
 class PosPage extends StatefulWidget {
   final UserModel currentUser;
   final Function(int, List<CartItem>) onAddToCartToTable;
   final List<int> Function() getActiveTableIds;
-  // Tambahkan service yang dibutuhkan
   final ArduinoService arduinoService;
   final PrinterService printerService;
 
@@ -27,8 +29,8 @@ class PosPage extends StatefulWidget {
     required this.currentUser,
     required this.onAddToCartToTable,
     required this.getActiveTableIds,
-    required this.arduinoService, // Jadikan required
-    required this.printerService, // Jadikan required
+    required this.arduinoService,
+    required this.printerService,
   });
 
   @override
@@ -43,7 +45,6 @@ class _PosPageState extends State<PosPage> {
   final NumberFormat _currencyFormat =
       NumberFormat.currency(locale: 'id_ID', symbol: 'Rp ', decimalDigits: 0);
 
-  // Tambahkan listener untuk printer service
   @override
   void initState() {
     super.initState();
@@ -136,7 +137,6 @@ class _PosPageState extends State<PosPage> {
     }
   }
 
-  /// Mengelola penambahan item ke keranjang.
   void _handleAddToCart(dynamic itemOrProduct) {
     setState(() {
       if (itemOrProduct is CartItem) {
@@ -186,7 +186,7 @@ class _PosPageState extends State<PosPage> {
 
   double get _subtotal {
     return _cart.fold(0, (sum, item) {
-      final price = item.selectedVariant?.price ?? (item.product).sellingPrice;
+      final price = item.selectedVariant?.price ?? item.product.sellingPrice;
       return sum + (price * item.quantity);
     });
   }
@@ -245,7 +245,30 @@ class _PosPageState extends State<PosPage> {
     );
 
     if (selectedTable != null) {
-      widget.onAddToCartToTable(selectedTable, List<CartItem>.from(_cart));
+      final itemsToPrint = List<CartItem>.from(_cart);
+      widget.onAddToCartToTable(selectedTable, itemsToPrint);
+
+      if (widget.printerService.isConnected) {
+        final receiptData =
+            ReceiptBuilder.buildKitchenOrder(itemsToPrint, selectedTable);
+        await widget.printerService.sendRawData(receiptData);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content:
+                Text('Pesanan Dapur untuk Meja $selectedTable berhasil dicetak!'),
+            backgroundColor: Colors.green,
+          ));
+        }
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content:
+                Text('Gagal mencetak pesanan dapur: Printer tidak terhubung.'),
+            backgroundColor: Colors.orange,
+          ));
+        }
+      }
+
       _clearCart();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -385,6 +408,36 @@ class _PosPageState extends State<PosPage> {
           await _localDbService.decreaseStockForSale(
               product.key, item.quantity);
         }
+
+        if (widget.printerService.isConnected) {
+          final customerReceipt = ReceiptBuilder.buildPosReceipt(
+              localTransaction, ReceiptType.customer);
+          await widget.printerService.sendRawData(customerReceipt);
+
+          final cashierReceipt = ReceiptBuilder.buildPosReceipt(
+              localTransaction, ReceiptType.cashier);
+          await widget.printerService.sendRawData(cashierReceipt);
+
+          final kitchenReceipt = ReceiptBuilder.buildPosReceipt(
+              localTransaction, ReceiptType.kitchen);
+          await widget.printerService.sendRawData(kitchenReceipt);
+
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text('Nota berhasil dicetak!'),
+              backgroundColor: Colors.green,
+            ));
+          }
+        } else {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text(
+                  'Transaksi disimpan, tapi nota gagal dicetak: Printer tidak terhubung.'),
+              backgroundColor: Colors.orange,
+            ));
+          }
+        }
+
         _clearCart();
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -404,7 +457,6 @@ class _PosPageState extends State<PosPage> {
 
   @override
   Widget build(BuildContext context) {
-    // Tentukan status koneksi printer
     final isPrinterConnected = widget.printerService.isConnected;
 
     return Scaffold(
@@ -414,24 +466,20 @@ class _PosPageState extends State<PosPage> {
         backgroundColor: Colors.transparent,
         elevation: 0,
         actions: [
-          // Icon untuk mengosongkan keranjang
           IconButton(
             icon: const Icon(Icons.delete_sweep),
             tooltip: 'Kosongkan Keranjang',
             onPressed: _cart.isNotEmpty ? _clearCart : null,
           ),
-          // Icon baru untuk status printer dan navigasi
           IconButton(
             icon: Icon(
               Icons.print_outlined,
-              // Warna merah jika tidak terhubung
               color: isPrinterConnected ? Colors.cyanAccent : Colors.redAccent,
             ),
             tooltip: isPrinterConnected
                 ? 'Printer Terhubung'
                 : 'Printer Tidak Terhubung',
             onPressed: () {
-              // Navigasi ke ConnectionPage
               Navigator.push(
                 context,
                 MaterialPageRoute(
