@@ -19,6 +19,7 @@ import 'package:putra_jaya_billiard/pages/stocks/stocks_opname_page.dart';
 import 'package:putra_jaya_billiard/pages/suppliers/suppliers_pages.dart';
 import 'package:putra_jaya_billiard/pages/transactions/transactions_page.dart';
 import 'package:putra_jaya_billiard/services/arduino_service.dart';
+import 'package:putra_jaya_billiard/services/printer_service.dart'; // FIX: Import printer_service
 import 'package:putra_jaya_billiard/widgets/app_drawer.dart';
 import 'package:putra_jaya_billiard/widgets/custom_app_bar.dart';
 import 'package:window_manager/window_manager.dart';
@@ -26,11 +27,14 @@ import 'package:window_manager/window_manager.dart';
 class MainLayout extends StatefulWidget {
   final UserModel user;
   final ArduinoService arduinoService;
+  // FIX: Ganti tipe data dari ArduinoService ke PrinterService
+  final PrinterService printerService;
 
   const MainLayout({
     super.key,
     required this.user,
     required this.arduinoService,
+    required this.printerService,
   });
 
   @override
@@ -41,7 +45,6 @@ class _MainLayoutState extends State<MainLayout> {
   int _selectedIndex = 0;
   final Map<int, Widget> _pageMap = {};
 
-  // Kunci global untuk mengakses state dari DashboardPage
   final GlobalKey<DashboardPageState> _dashboardKey =
       GlobalKey<DashboardPageState>();
 
@@ -54,17 +57,15 @@ class _MainLayoutState extends State<MainLayout> {
   @override
   void dispose() {
     widget.arduinoService.dispose();
+    widget.printerService.dispose();
     super.dispose();
   }
 
-  // Fungsi yang dipanggil dari POS untuk menambahkan item ke meja di Dashboard
   void _handleAddToCartToTable(int tableId, List<CartItem> items) {
     _dashboardKey.currentState?.addToCartToTable(tableId, items);
-    // Setelah item ditambahkan, otomatis pindah ke halaman dashboard
     _onPageSelected(0);
   }
 
-  // Fungsi yang dipanggil dari POS untuk mendapatkan daftar meja yang aktif
   List<int> _getActiveTableIds() {
     return _dashboardKey.currentState?.getActiveTableIds() ?? [];
   }
@@ -72,15 +73,18 @@ class _MainLayoutState extends State<MainLayout> {
   void _buildPages() {
     // Halaman yang bisa diakses semua role
     _pageMap[0] = DashboardPage(
-      key: _dashboardKey, // Pasang key di sini
+      key: _dashboardKey,
       user: widget.user,
       arduinoService: widget.arduinoService,
+      printerService: widget.printerService,
     );
     _pageMap[1] = ReportsPage(userRole: widget.user.role);
     _pageMap[6] = PosPage(
       currentUser: widget.user,
-      onAddToCartToTable: _handleAddToCartToTable, // Kirim callback
-      getActiveTableIds: _getActiveTableIds, // Kirim callback
+      onAddToCartToTable: _handleAddToCartToTable,
+      getActiveTableIds: _getActiveTableIds,
+      arduinoService: widget.arduinoService,
+      printerService: widget.printerService,
     );
     _pageMap[8] = PurchasePage(currentUser: widget.user);
     _pageMap[9] = const StockReportPage();

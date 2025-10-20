@@ -5,12 +5,12 @@ import 'package:intl/intl.dart' as intl;
 import 'package:putra_jaya_billiard/models/cart_item_model.dart';
 import 'package:putra_jaya_billiard/models/local_member.dart';
 import 'package:putra_jaya_billiard/models/local_payment_method.dart';
-import 'package:putra_jaya_billiard/models/local_product.dart';
 import 'package:putra_jaya_billiard/models/local_transaction.dart';
 import 'package:putra_jaya_billiard/models/relay_data.dart';
 import 'package:putra_jaya_billiard/models/user_model.dart';
 import 'package:putra_jaya_billiard/pages/connection/connection_page.dart';
 import 'package:putra_jaya_billiard/services/arduino_service.dart';
+import 'package:putra_jaya_billiard/services/printer_service.dart';
 import 'package:putra_jaya_billiard/services/billing_services.dart';
 import 'package:putra_jaya_billiard/services/local_database_service.dart';
 import 'package:sliding_up_panel/sliding_up_panel.dart';
@@ -22,11 +22,14 @@ const int numRelays = 32;
 class DashboardPage extends StatefulWidget {
   final UserModel user;
   final ArduinoService arduinoService;
+  // Tambahkan service untuk printer
+  final PrinterService printerService;
 
   const DashboardPage({
     super.key,
     required this.user,
     required this.arduinoService,
+    required this.printerService, // Jadikan required
   });
 
   @override
@@ -49,14 +52,21 @@ class DashboardPageState extends State<DashboardPage> {
     _startLogicTimer();
     _loadRates();
     widget.arduinoService.onDataReceived = (data) => _addLog('Arduino: $data');
+    // Dengarkan perubahan koneksi pada kedua service
+    // agar UI (AppBar icon) dapat diperbarui
     widget.arduinoService.onConnectionChanged = () {
+      if (mounted) setState(() {});
+    };
+    widget.printerService.onConnectionChanged = () {
       if (mounted) setState(() {});
     };
   }
 
   @override
   void dispose() {
+    // Hapus listener saat widget di-dispose
     widget.arduinoService.onConnectionChanged = null;
+    widget.printerService.onConnectionChanged = null;
     _logicTimer?.cancel();
     _logScrollController.dispose();
     super.dispose();
@@ -195,7 +205,7 @@ class DashboardPageState extends State<DashboardPage> {
       memberName: member?.name,
       paymentMethod: paymentMethod,
       items: posItemsToSave.map((item) {
-        final product = item.product as LocalProduct;
+        final product = item.product;
         return {
           'productId': product.key.toString(),
           'productName': product.name,
@@ -308,9 +318,7 @@ class DashboardPageState extends State<DashboardPage> {
             final double posSubtotal = relay.posItems.fold(
                 0,
                 (sum, item) =>
-                    sum +
-                    ((item.product as LocalProduct).sellingPrice *
-                        item.quantity));
+                    sum + ((item.product).sellingPrice * item.quantity));
             final grandSubtotal = billiardSubtotal + posSubtotal;
             final discountPercentage =
                 selectedMemberInDialog?.discountPercentage ?? 0;
@@ -345,7 +353,7 @@ class DashboardPageState extends State<DashboardPage> {
                       const Text('Detail Pesanan F&B:',
                           style: TextStyle(fontWeight: FontWeight.bold)),
                       ...relay.posItems.map((item) {
-                        final product = item.product as LocalProduct;
+                        final product = item.product;
                         return ListTile(
                           dense: true,
                           contentPadding: EdgeInsets.zero,
@@ -353,7 +361,7 @@ class DashboardPageState extends State<DashboardPage> {
                           trailing: Text(_formatCurrency(
                               product.sellingPrice * item.quantity)),
                         );
-                      }).toList(),
+                      }),
                     ],
                     const Divider(height: 24, color: Colors.white24),
                     const Text('Metode Pembayaran:',
@@ -404,7 +412,7 @@ class DashboardPageState extends State<DashboardPage> {
                               value: member,
                               child: Text(member.name),
                             );
-                          }).toList(),
+                          }),
                         ];
                         final currentSelectionExists = members
                             .any((m) => m.key == selectedMemberInDialog?.key);
@@ -576,12 +584,14 @@ class DashboardPageState extends State<DashboardPage> {
     );
   }
 
+  // Perbarui fungsi navigasi untuk membawa kedua service
   void _navigateToConnectionPage() {
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => ConnectionPage(
           arduinoService: widget.arduinoService,
+          printerService: widget.printerService, // Kirim printer service juga
         ),
       ),
     );
@@ -598,7 +608,8 @@ class DashboardPageState extends State<DashboardPage> {
       onClearLog: () => setState(() => _logMessages = ''),
     );
 
-    final bool isConnected = widget.arduinoService.isConnected;
+    // Dapatkan status koneksi panel (Arduino)
+    final bool isPanelConnected = widget.arduinoService.isConnected;
 
     return Scaffold(
       appBar: AppBar(
@@ -608,13 +619,14 @@ class DashboardPageState extends State<DashboardPage> {
         actions: [
           Tooltip(
             key: const ValueKey('connection_tooltip'),
-            message: isConnected
-                ? 'Terhubung'
-                : 'Tidak Terhubung - Klik untuk mengatur',
+            // Pesan tooltip mencakup kedua koneksi
+            message:
+                'Panel: ${isPanelConnected ? 'Terhubung' : 'Tidak Terhubung'}\nKlik untuk mengatur koneksi.',
             child: IconButton(
               icon: Icon(
                 Icons.usb,
-                color: isConnected ? Colors.greenAccent : Colors.redAccent,
+                // Warna merah jika panel tidak terhubung, sesuai permintaan
+                color: isPanelConnected ? Colors.greenAccent : Colors.redAccent,
               ),
               onPressed: _navigateToConnectionPage,
             ),

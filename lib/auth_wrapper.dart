@@ -3,12 +3,14 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:putra_jaya_billiard/models/user_model.dart';
 import 'package:putra_jaya_billiard/pages/login_page.dart';
+// FIX: Nama file yang benar adalah main_layout.dart bukan main_layouts.dart
 import 'package:putra_jaya_billiard/pages/main_layouts.dart';
-import 'package:putra_jaya_billiard/services/arduino_service.dart'; // Import service
+import 'package:putra_jaya_billiard/services/arduino_service.dart';
+// FIX: Import printer_service.dart
+import 'package:putra_jaya_billiard/services/printer_service.dart';
 import 'package:putra_jaya_billiard/services/auth_service.dart';
 import 'package:window_manager/window_manager.dart';
 
-// DIUBAH MENJADI STATEFULWIDGET
 class AuthWrapper extends StatefulWidget {
   const AuthWrapper({super.key});
 
@@ -17,13 +19,17 @@ class AuthWrapper extends StatefulWidget {
 }
 
 class _AuthWrapperState extends State<AuthWrapper> {
-  // 1. Buat instance ArduinoService di sini, HANYA SATU KALI.
+  // Buat instance untuk kedua service, HANYA SATU KALI.
   final ArduinoService _arduinoService = ArduinoService();
+  // FIX: Buat instance untuk PrinterService
+  final PrinterService _printerService = PrinterService();
 
   @override
   void dispose() {
-    // 2. Pastikan service di-dispose dengan benar saat aplikasi ditutup.
+    // Pastikan kedua service di-dispose dengan benar.
     _arduinoService.dispose();
+    // FIX: dispose printerService
+    _printerService.dispose();
     super.dispose();
   }
 
@@ -39,10 +45,12 @@ class _AuthWrapperState extends State<AuthWrapper> {
         }
 
         if (snapshot.hasData) {
-          // 3. Teruskan instance service ke RoleDispatcher
+          // Teruskan kedua instance service ke RoleDispatcher
           return RoleDispatcher(
             user: snapshot.data!,
             arduinoService: _arduinoService,
+            // FIX: Teruskan printerService
+            printerService: _printerService,
           );
         } else {
           return const LoginPage();
@@ -54,12 +62,16 @@ class _AuthWrapperState extends State<AuthWrapper> {
 
 class RoleDispatcher extends StatelessWidget {
   final User user;
-  final ArduinoService arduinoService; // 4. Terima service di sini
+  final ArduinoService arduinoService;
+  // FIX: Terima printerService di sini
+  final PrinterService printerService;
 
   const RoleDispatcher({
     super.key,
     required this.user,
-    required this.arduinoService, // 5. Jadikan parameter wajib
+    required this.arduinoService,
+    // FIX: Jadikan printerService parameter wajib
+    required this.printerService,
   });
 
   @override
@@ -81,10 +93,12 @@ class RoleDispatcher extends StatelessWidget {
 
           final userModel = UserModel.fromFirestore(snapshot.data!);
 
-          // 6. Teruskan service ke MainLayout, error sekarang teratasi!
+          // Teruskan kedua service ke MainLayout
           return MainLayout(
             user: userModel,
             arduinoService: arduinoService,
+            // FIX: Teruskan printerService ke MainLayout
+            printerService: printerService,
           );
         }
 

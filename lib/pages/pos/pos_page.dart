@@ -9,18 +9,26 @@ import 'package:putra_jaya_billiard/models/local_stock_mutation.dart';
 import 'package:putra_jaya_billiard/models/local_transaction.dart';
 import 'package:putra_jaya_billiard/models/product_variant.dart';
 import 'package:putra_jaya_billiard/models/user_model.dart';
+import 'package:putra_jaya_billiard/pages/connection/connection_page.dart'; // Import ConnectionPage
+import 'package:putra_jaya_billiard/services/arduino_service.dart'; // Import ArduinoService
+import 'package:putra_jaya_billiard/services/printer_service.dart'; // Import PrinterService
 import 'package:putra_jaya_billiard/services/local_database_service.dart';
 
 class PosPage extends StatefulWidget {
   final UserModel currentUser;
   final Function(int, List<CartItem>) onAddToCartToTable;
   final List<int> Function() getActiveTableIds;
+  // Tambahkan service yang dibutuhkan
+  final ArduinoService arduinoService;
+  final PrinterService printerService;
 
   const PosPage({
     super.key,
     required this.currentUser,
     required this.onAddToCartToTable,
     required this.getActiveTableIds,
+    required this.arduinoService, // Jadikan required
+    required this.printerService, // Jadikan required
   });
 
   @override
@@ -35,7 +43,23 @@ class _PosPageState extends State<PosPage> {
   final NumberFormat _currencyFormat =
       NumberFormat.currency(locale: 'id_ID', symbol: 'Rp ', decimalDigits: 0);
 
-  /// Menampilkan dialog untuk memilih varian produk dan menambahkan catatan.
+  // Tambahkan listener untuk printer service
+  @override
+  void initState() {
+    super.initState();
+    widget.printerService.onConnectionChanged = () {
+      if (mounted) {
+        setState(() {});
+      }
+    };
+  }
+
+  @override
+  void dispose() {
+    widget.printerService.onConnectionChanged = null;
+    super.dispose();
+  }
+
   Future<void> _showVariantSelectionDialog(LocalProduct product) async {
     ProductVariant? selectedVariant =
         product.variants.isNotEmpty ? product.variants.first : null;
@@ -67,7 +91,7 @@ class _PosPageState extends State<PosPage> {
                         },
                         contentPadding: EdgeInsets.zero,
                       );
-                    }).toList(),
+                    }),
                     const SizedBox(height: 16),
                     TextField(
                       controller: noteController,
@@ -126,7 +150,7 @@ class _PosPageState extends State<PosPage> {
         }
 
         final index = _cart.indexWhere((item) =>
-            (item.product as LocalProduct).key == product.key &&
+            (item.product).key == product.key &&
             item.selectedVariant == null &&
             item.note == null);
 
@@ -146,7 +170,7 @@ class _PosPageState extends State<PosPage> {
 
   void _updateQuantity(CartItem item, int change) {
     setState(() {
-      final product = item.product as LocalProduct;
+      final product = item.product;
       final newQuantity = item.quantity + change;
       if (newQuantity <= 0) {
         _cart.remove(item);
@@ -162,8 +186,7 @@ class _PosPageState extends State<PosPage> {
 
   double get _subtotal {
     return _cart.fold(0, (sum, item) {
-      final price = item.selectedVariant?.price ??
-          (item.product as LocalProduct).sellingPrice;
+      final price = item.selectedVariant?.price ?? (item.product).sellingPrice;
       return sum + (price * item.quantity);
     });
   }
@@ -331,7 +354,7 @@ class _PosPageState extends State<PosPage> {
           memberName: _selectedMember?.name,
           paymentMethod: selectedPaymentMethod,
           items: _cart.map((item) {
-            final product = item.product as LocalProduct;
+            final product = item.product;
             return {
               'productId': product.key.toString(),
               'productName': product.name,
@@ -346,7 +369,7 @@ class _PosPageState extends State<PosPage> {
         await _localDbService.addTransaction(localTransaction);
 
         for (var item in _cart) {
-          final product = item.product as LocalProduct;
+          final product = item.product;
           final stockBefore = product.stock;
           final mutation = LocalStockMutation(
               productId: product.key.toString(),
@@ -381,6 +404,9 @@ class _PosPageState extends State<PosPage> {
 
   @override
   Widget build(BuildContext context) {
+    // Tentukan status koneksi printer
+    final isPrinterConnected = widget.printerService.isConnected;
+
     return Scaffold(
       backgroundColor: Colors.transparent,
       appBar: AppBar(
@@ -388,10 +414,34 @@ class _PosPageState extends State<PosPage> {
         backgroundColor: Colors.transparent,
         elevation: 0,
         actions: [
+          // Icon untuk mengosongkan keranjang
           IconButton(
             icon: const Icon(Icons.delete_sweep),
             tooltip: 'Kosongkan Keranjang',
             onPressed: _cart.isNotEmpty ? _clearCart : null,
+          ),
+          // Icon baru untuk status printer dan navigasi
+          IconButton(
+            icon: Icon(
+              Icons.print_outlined,
+              // Warna merah jika tidak terhubung
+              color: isPrinterConnected ? Colors.cyanAccent : Colors.redAccent,
+            ),
+            tooltip: isPrinterConnected
+                ? 'Printer Terhubung'
+                : 'Printer Tidak Terhubung',
+            onPressed: () {
+              // Navigasi ke ConnectionPage
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => ConnectionPage(
+                    arduinoService: widget.arduinoService,
+                    printerService: widget.printerService,
+                  ),
+                ),
+              );
+            },
           ),
         ],
       ),
@@ -517,7 +567,7 @@ class _PosPageState extends State<PosPage> {
                 value: member,
                 child: Text(member.name),
               );
-            }).toList(),
+            }),
           ];
           return DropdownButton<LocalMember?>(
             value: _selectedMember,
@@ -556,7 +606,7 @@ class _PosPageState extends State<PosPage> {
                     itemCount: _cart.length,
                     itemBuilder: (context, index) {
                       final item = _cart[index];
-                      final product = item.product as LocalProduct;
+                      final product = item.product;
                       final price =
                           item.selectedVariant?.price ?? product.sellingPrice;
 

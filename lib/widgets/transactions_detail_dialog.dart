@@ -114,7 +114,7 @@ class TransactionDetailDialog extends StatelessWidget {
               style: TextStyle(fontWeight: FontWeight.bold)),
           const SizedBox(height: 8),
           // Menggunakan helper widget yang baru
-          ...items.map((item) => _buildItemDetails(item, formatter)).toList(),
+          ...items.map((item) => _buildItemDetails(item, formatter)),
         ],
         const Divider(height: 20, color: Colors.white24),
         _buildDetailRow('Total', formatter.format(transaction.totalAmount),
@@ -141,7 +141,7 @@ class TransactionDetailDialog extends StatelessWidget {
             style: TextStyle(fontWeight: FontWeight.bold)),
         const SizedBox(height: 8),
         // Menggunakan helper widget yang baru
-        ...items.map((item) => _buildItemDetails(item, formatter)).toList(),
+        ...items.map((item) => _buildItemDetails(item, formatter)),
 
         const Divider(height: 20, color: Colors.white24),
         _buildDetailRow(
@@ -178,7 +178,7 @@ class TransactionDetailDialog extends StatelessWidget {
             child: Text(
                 '- ${item['quantity']}x ${item['productName']} @ ${formatter.format(item['purchasePrice'])}'),
           );
-        }).toList(),
+        }),
         const Divider(height: 20, color: Colors.white24),
         _buildDetailRow('Metode Bayar', transaction.paymentMethod ?? 'Cash'),
         _buildDetailRow('Total', formatter.format(transaction.totalAmount),

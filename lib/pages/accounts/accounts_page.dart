@@ -1,3 +1,5 @@
+// ignore_for_file: use_build_context_synchronously
+
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:putra_jaya_billiard/models/user_model.dart';
@@ -64,6 +66,7 @@ class _AccountsPageState extends State<AccountsPage> {
         'nama': newName,
         'role': newRole,
       });
+
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
             content: Text('Data berhasil diperbarui'),

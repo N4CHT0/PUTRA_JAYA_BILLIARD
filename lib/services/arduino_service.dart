@@ -68,7 +68,7 @@ class ArduinoService {
 
     try {
       if (!_port!.openReadWrite()) {
-        throw SerialPortError("Gagal membuka port.");
+        throw const SerialPortError("Gagal membuka port.");
       }
       _port!.config = SerialPortConfig()
         ..baudRate = 9600

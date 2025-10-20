@@ -145,8 +145,8 @@ class _PurchasePageState extends State<PurchasePage> {
               onPressed: () {
                 if (formKey.currentState!.validate()) {
                   setState(() {
-                    final existingIndex = _purchaseItems.indexWhere((item) =>
-                        (item.product as LocalProduct).key == product.key);
+                    final existingIndex = _purchaseItems.indexWhere(
+                        (item) => (item.product).key == product.key);
 
                     final qty = int.tryParse(qtyController.text) ?? 1;
                     final price = double.tryParse(priceController.text) ?? 0;
@@ -224,7 +224,7 @@ class _PurchasePageState extends State<PurchasePage> {
           supplierName: _selectedSupplier!.name,
           paymentMethod: _selectedPaymentMethod, // ✅ Gunakan state
           items: _purchaseItems.map((item) {
-            final product = item.product as LocalProduct;
+            final product = item.product;
             return {
               'productId': product.key.toString(),
               'productName': product.name,
@@ -237,7 +237,7 @@ class _PurchasePageState extends State<PurchasePage> {
         await _localDbService.addTransaction(localTransaction);
 
         for (var item in _purchaseItems) {
-          final product = item.product as LocalProduct;
+          final product = item.product;
           final stockBefore = product.stock;
 
           final mutation = LocalStockMutation(
@@ -366,7 +366,7 @@ class _PurchasePageState extends State<PurchasePage> {
                     itemCount: _purchaseItems.length,
                     itemBuilder: (context, index) {
                       final item = _purchaseItems[index];
-                      final product = item.product as LocalProduct;
+                      final product = item.product;
                       return ListTile(
                         title: Text(product.name),
                         subtitle: Text(

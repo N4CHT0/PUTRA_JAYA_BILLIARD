@@ -26,7 +26,7 @@ class LocalTransactionAdapter extends TypeAdapter<LocalTransaction> {
       paymentMethod: fields[17] as String?,
       items: (fields[6] as List?)
           ?.map((dynamic e) => (e as Map).cast<String, dynamic>())
-          ?.toList(),
+          .toList(),
       supplierId: fields[7] as String?,
       supplierName: fields[8] as String?,
       tableId: fields[9] as int?,

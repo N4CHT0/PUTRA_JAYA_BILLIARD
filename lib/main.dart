@@ -5,7 +5,6 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:putra_jaya_billiard/models/product_variant.dart';
 import 'firebase_options.dart';
 import 'package:hive_flutter/hive_flutter.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:putra_jaya_billiard/auth_wrapper.dart';
 

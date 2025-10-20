@@ -79,9 +79,9 @@ class BilliardTableCard extends StatelessWidget {
                       SizedBox(
                         height: 28,
                         child: TextButton(
+                          onPressed: onCancelSession,
                           child: const Text('Batalkan Sesi',
                               style: TextStyle(color: Colors.white70)),
-                          onPressed: onCancelSession,
                         ),
                       )
                     ],
