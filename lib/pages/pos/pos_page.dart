@@ -62,9 +62,20 @@ class _PosPageState extends State<PosPage> {
   }
 
   Future<void> _showVariantSelectionDialog(LocalProduct product) async {
-    ProductVariant? selectedVariant =
-        product.variants.isNotEmpty ? product.variants.first : null;
+    ProductVariant? selectedVariant;
+    try {
+      selectedVariant = product.variants.firstWhere((v) => v.stock > 0);
+    } catch (e) {
+      selectedVariant = null; // Tidak ada varian yang stoknya tersedia
+    }
+
     final noteController = TextEditingController();
+
+    if (product.variants.isEmpty || product.totalStock <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Stok untuk ${product.name} habis.')));
+      return;
+    }
 
     final result = await showDialog<CartItem>(
       context: context,
@@ -82,15 +93,19 @@ class _PosPageState extends State<PosPage> {
                     const Text('Varian:',
                         style: TextStyle(fontWeight: FontWeight.bold)),
                     ...product.variants.map((variant) {
+                      final bool isOutOfStock = variant.stock <= 0;
                       return RadioListTile<ProductVariant>(
-                        title: Text(variant.name),
-                        subtitle: Text(_currencyFormat.format(variant.price)),
+                        title: Text(
+                            variant.name + (isOutOfStock ? ' (Habis)' : '')),
+                        subtitle: Text(
+                            '${_currencyFormat.format(variant.sellingPrice)} - Stok: ${variant.stock}'),
                         value: variant,
                         groupValue: selectedVariant,
-                        onChanged: (value) {
-                          setStateInDialog(() => selectedVariant = value);
-                        },
-                        contentPadding: EdgeInsets.zero,
+                        onChanged: isOutOfStock
+                            ? null
+                            : (value) {
+                                setStateInDialog(() => selectedVariant = value);
+                              },
                       );
                     }),
                     const SizedBox(height: 16),
@@ -98,7 +113,7 @@ class _PosPageState extends State<PosPage> {
                       controller: noteController,
                       decoration: const InputDecoration(
                         labelText: 'Catatan (opsional)',
-                        hintText: 'Contoh: Gula 1 sendok',
+                        hintText: 'Contoh: Tidak pedas',
                         border: OutlineInputBorder(),
                       ),
                       textCapitalization: TextCapitalization.sentences,
@@ -137,48 +152,48 @@ class _PosPageState extends State<PosPage> {
     }
   }
 
-  void _handleAddToCart(dynamic itemOrProduct) {
+  void _handleAddToCart(CartItem item) {
     setState(() {
-      if (itemOrProduct is CartItem) {
-        _cart.add(itemOrProduct);
-      } else if (itemOrProduct is LocalProduct) {
-        final product = itemOrProduct;
-        if (product.stock <= 0) {
-          ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('Stok ${product.name} habis.')));
-          return;
-        }
+      if (item.selectedVariant == null) return;
+      if (item.selectedVariant!.stock <= 0) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(
+                'Stok ${item.product.name} - ${item.selectedVariant!.name} habis.')));
+        return;
+      }
 
-        final index = _cart.indexWhere((item) =>
-            (item.product).key == product.key &&
-            item.selectedVariant == null &&
-            item.note == null);
+      final index = _cart.indexWhere((cartItem) =>
+          cartItem.product.key == item.product.key &&
+          cartItem.selectedVariant?.name == item.selectedVariant?.name &&
+          cartItem.note == item.note);
 
-        if (index != -1) {
-          if (_cart[index].quantity < product.stock) {
-            _cart[index].quantity++;
-          } else {
-            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                content: Text('Stok ${product.name} tidak mencukupi.')));
-          }
+      if (index != -1) {
+        if (_cart[index].quantity < item.selectedVariant!.stock) {
+          _cart[index].quantity++;
         } else {
-          _cart.add(CartItem(product: product));
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text(
+                  'Stok ${item.product.name} - ${item.selectedVariant!.name} tidak mencukupi.')));
         }
+      } else {
+        _cart.add(item);
       }
     });
   }
 
   void _updateQuantity(CartItem item, int change) {
     setState(() {
-      final product = item.product;
+      if (item.selectedVariant == null) return;
       final newQuantity = item.quantity + change;
       if (newQuantity <= 0) {
         _cart.remove(item);
-      } else if (newQuantity <= product.stock) {
+      } else if (newQuantity <= item.selectedVariant!.stock) {
         item.quantity = newQuantity;
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Stok ${product.name} tidak mencukupi.')),
+          SnackBar(
+              content: Text(
+                  'Stok ${item.product.name} - ${item.selectedVariant!.name} tidak mencukupi.')),
         );
       }
     });
@@ -186,7 +201,7 @@ class _PosPageState extends State<PosPage> {
 
   double get _subtotal {
     return _cart.fold(0, (sum, item) {
-      final price = item.selectedVariant?.price ?? item.product.sellingPrice;
+      final price = item.selectedVariant?.sellingPrice ?? 0;
       return sum + (price * item.quantity);
     });
   }
@@ -254,8 +269,8 @@ class _PosPageState extends State<PosPage> {
         await widget.printerService.sendRawData(receiptData);
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content:
-                Text('Pesanan Dapur untuk Meja $selectedTable berhasil dicetak!'),
+            content: Text(
+                'Pesanan Dapur untuk Meja $selectedTable berhasil dicetak!'),
             backgroundColor: Colors.green,
           ));
         }
@@ -376,37 +391,32 @@ class _PosPageState extends State<PosPage> {
           memberId: _selectedMember?.key.toString(),
           memberName: _selectedMember?.name,
           paymentMethod: selectedPaymentMethod,
-          items: _cart.map((item) {
-            final product = item.product;
-            return {
-              'productId': product.key.toString(),
-              'productName': product.name,
-              'quantity': item.quantity,
-              'price': item.selectedVariant?.price ?? product.sellingPrice,
-              'variantName': item.selectedVariant?.name,
-              'note': item.note,
-            };
-          }).toList(),
+          items: _cart.map((item) => item.toMapForTransaction()).toList(),
         );
 
         await _localDbService.addTransaction(localTransaction);
 
         for (var item in _cart) {
-          final product = item.product;
-          final stockBefore = product.stock;
-          final mutation = LocalStockMutation(
-              productId: product.key.toString(),
-              productName: product.name,
-              type: 'sale',
-              quantityChange: -item.quantity,
-              stockBefore: stockBefore,
-              notes: 'POS Transaksi',
-              date: now,
-              userId: widget.currentUser.uid,
-              userName: widget.currentUser.nama);
-          await _localDbService.addStockMutation(mutation);
-          await _localDbService.decreaseStockForSale(
-              product.key, item.quantity);
+          if (item.selectedVariant != null) {
+            final product = item.product;
+            final variant = item.selectedVariant!;
+            final stockBefore = variant.stock;
+
+            final mutation = LocalStockMutation(
+                productId: product.key.toString(),
+                productName: '${product.name} (${variant.name})',
+                type: 'sale',
+                quantityChange: -item.quantity,
+                stockBefore: stockBefore,
+                notes: 'POS Transaksi',
+                date: now,
+                userId: widget.currentUser.uid,
+                userName: widget.currentUser.nama);
+            await _localDbService.addStockMutation(mutation);
+
+            await _localDbService.decreaseVariantStockForSale(
+                product.key, variant, item.quantity);
+          }
         }
 
         if (widget.printerService.isConnected) {
@@ -531,13 +541,15 @@ class _PosPageState extends State<PosPage> {
             itemCount: products.length,
             itemBuilder: (context, index) {
               final product = products[index];
+              double minPrice = product.variants.isNotEmpty
+                  ? product.variants
+                      .map((v) => v.sellingPrice)
+                      .reduce((a, b) => a < b ? a : b)
+                  : 0;
+
               return InkWell(
                 onTap: () {
-                  if (product.hasVariants) {
-                    _showVariantSelectionDialog(product);
-                  } else {
-                    _handleAddToCart(product);
-                  }
+                  _showVariantSelectionDialog(product);
                 },
                 borderRadius: BorderRadius.circular(8),
                 child: Card(
@@ -555,18 +567,16 @@ class _PosPageState extends State<PosPage> {
                         Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text("Stok: ${product.stock}",
+                            Text("Total Stok: ${product.totalStock}",
                                 style: TextStyle(
-                                    color: product.stock <= 5
+                                    color: product.totalStock <= 5
                                         ? Colors.redAccent
                                         : Colors.grey[400],
                                     fontSize: 12)),
                             Text(
-                                product.hasVariants &&
-                                        product.variants.isNotEmpty
-                                    ? 'Mulai dari ${_currencyFormat.format(product.variants.first.price)}'
-                                    : _currencyFormat
-                                        .format(product.sellingPrice),
+                                product.hasVariants
+                                    ? 'Mulai dari ${_currencyFormat.format(minPrice)}'
+                                    : 'Tidak ada varian',
                                 style:
                                     const TextStyle(color: Colors.cyanAccent)),
                           ],
@@ -654,11 +664,8 @@ class _PosPageState extends State<PosPage> {
                     itemCount: _cart.length,
                     itemBuilder: (context, index) {
                       final item = _cart[index];
-                      final product = item.product;
-                      final price =
-                          item.selectedVariant?.price ?? product.sellingPrice;
-
-                      String title = product.name;
+                      final price = item.selectedVariant?.sellingPrice ?? 0;
+                      String title = item.product.name;
                       if (item.selectedVariant != null) {
                         title += ' (${item.selectedVariant!.name})';
                       }

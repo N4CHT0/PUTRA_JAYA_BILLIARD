@@ -23,7 +23,7 @@ class CartItem {
       'productName': product.name,
       'quantity': quantity,
       // Gunakan harga varian jika ada, jika tidak, gunakan harga dasar produk
-      'price': selectedVariant?.price ?? product.sellingPrice,
+      'price': selectedVariant?.sellingPrice ?? 0,
       'variantName': selectedVariant?.name, // Simpan nama varian
       'note': note, // Simpan catatan
     };

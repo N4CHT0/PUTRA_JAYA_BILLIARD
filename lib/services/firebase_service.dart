@@ -51,17 +51,24 @@ class FirebaseService {
     final salesDocRef = _db.collection(_financialTransactionsCollection).doc();
 
     for (var item in cartItems) {
-      final productDocRef = _db.collection('products').doc(item.product.id!);
+      if (item.product.id == null || item.selectedVariant == null) continue;
 
+      _db.collection('products').doc(item.product.id!);
+      final selectedVariant = item.selectedVariant!;
+
+      // WARNING: Firestore array updates are complex. This section is for mutation logging only.
+      // Stock updates on Firebase would require a get-then-set operation, ideally in a Cloud Function.
+      /*
       batch.update(
           productDocRef, {'stock': FieldValue.increment(-item.quantity)});
+      */
 
       final mutation = StockMutation(
         productId: item.product.id!,
-        productName: item.product.name,
+        productName: '${item.product.name} (${selectedVariant.name})',
         type: MutationType.sale,
         quantityChange: -item.quantity,
-        stockBefore: item.product.stock,
+        stockBefore: selectedVariant.stock,
         notes: 'POS Transaksi #${salesDocRef.id.substring(0, 6)}',
         date: DateTime.now(),
         userId: cashier.uid,
@@ -74,14 +81,7 @@ class FirebaseService {
     final Map<String, dynamic> financialTransactionData = {
       'flow': 'income',
       'type': 'pos',
-      'items': cartItems
-          .map((item) => {
-                'productId': item.product.id,
-                'productName': item.product.name,
-                'quantity': item.quantity,
-                'price': item.product.sellingPrice,
-              })
-          .toList(),
+      'items': cartItems.map((item) => item.toMapForTransaction()).toList(),
       'subtotal': subtotal,
       'discount': discount,
       'totalAmount': finalTotal,
@@ -108,19 +108,25 @@ class FirebaseService {
     double totalAmount = 0;
 
     for (var item in purchaseItems) {
-      final productDocRef = _db.collection('products').doc(item.product.id!);
+      if (item.product.id == null) continue;
 
+      _db.collection('products').doc(item.product.id!);
+      final variant = item.variant;
+
+      // WARNING: Firestore array updates are complex. This section is for mutation logging only.
+      /*
       batch.update(productDocRef, {
         'stock': FieldValue.increment(item.quantity),
         'purchasePrice': item.purchasePrice,
       });
+      */
 
       final mutation = StockMutation(
         productId: item.product.id!,
-        productName: item.product.name,
+        productName: '${item.product.name} (${variant.name})',
         type: MutationType.purchase,
         quantityChange: item.quantity,
-        stockBefore: item.product.stock,
+        stockBefore: variant.stock,
         notes: 'Pembelian dari ${supplier.name}',
         date: DateTime.now(),
         userId: user.uid,
@@ -140,7 +146,7 @@ class FirebaseService {
       'items': purchaseItems
           .map((item) => {
                 'productId': item.product.id,
-                'productName': item.product.name,
+                'productName': '${item.product.name} (${item.variant.name})',
                 'quantity': item.quantity,
                 'purchasePrice': item.purchasePrice,
               })

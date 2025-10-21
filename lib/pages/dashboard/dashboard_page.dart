@@ -7,7 +7,7 @@ import 'package:intl/intl.dart' as intl;
 import 'package:putra_jaya_billiard/models/cart_item_model.dart';
 import 'package:putra_jaya_billiard/models/local_member.dart';
 import 'package:putra_jaya_billiard/models/local_payment_method.dart';
-import 'package:putra_jaya_billiard/models/local_product.dart';
+import 'package:putra_jaya_billiard/models/local_stock_mutation.dart';
 import 'package:putra_jaya_billiard/models/local_transaction.dart';
 import 'package:putra_jaya_billiard/models/relay_data.dart';
 import 'package:putra_jaya_billiard/models/user_model.dart';
@@ -185,6 +185,7 @@ class DashboardPageState extends State<DashboardPage> {
     _addLog(
         'Sesi Meja $mejaId selesai. Total: ${_formatCurrency(finalTotal)} dibayar dengan $paymentMethod');
 
+    // FIX: Gunakan method toMapForTransaction dari CartItem
     final localTransaction = LocalTransaction(
       flow: 'income',
       type: 'billiard',
@@ -201,21 +202,36 @@ class DashboardPageState extends State<DashboardPage> {
       memberId: member?.key.toString(),
       memberName: member?.name,
       paymentMethod: paymentMethod,
-      items: posItemsToSave.map((item) {
-        final product = item.product;
-        return {
-          'productId': product.key.toString(),
-          'productName': product.name,
-          'quantity': item.quantity,
-          'price': item.selectedVariant?.price ?? product.sellingPrice,
-          'variantName': item.selectedVariant?.name,
-          'note': item.note,
-        };
-      }).toList(),
+      items: posItemsToSave.map((item) => item.toMapForTransaction()).toList(),
     );
 
     try {
       await _localDbService.addTransaction(localTransaction);
+
+      // FIX: Logika pengurangan stok untuk varian
+      for (var item in posItemsToSave) {
+        if (item.selectedVariant != null) {
+          final product = item.product;
+          final variant = item.selectedVariant!;
+          final stockBefore = variant.stock;
+
+          final mutation = LocalStockMutation(
+              productId: product.key.toString(),
+              productName: '${product.name} (${variant.name})',
+              type: 'sale',
+              quantityChange: -item.quantity,
+              stockBefore: stockBefore,
+              notes: 'Penjualan dari Meja $mejaId',
+              date: DateTime.now(),
+              userId: widget.user.uid,
+              userName: widget.user.nama);
+          await _localDbService.addStockMutation(mutation);
+
+          await _localDbService.decreaseVariantStockForSale(
+              product.key, variant, item.quantity);
+        }
+      }
+
       _addLog('Transaksi Meja $mejaId berhasil disimpan (Lokal).');
 
       if (widget.printerService.isConnected) {
@@ -329,12 +345,12 @@ class DashboardPageState extends State<DashboardPage> {
 
             final billiardSubtotal = _billingService
                 .calculateBilliardFee(billingDuration, date: startTime);
+            // FIX: Kalkulasi subtotal F&B dari varian
             final double posSubtotal = relay.posItems.fold(
                 0,
                 (sum, item) =>
                     sum +
-                    ((item.selectedVariant?.price ??
-                            item.product.sellingPrice) *
+                    ((item.selectedVariant?.sellingPrice ?? 0) *
                         item.quantity));
             final grandSubtotal = billiardSubtotal + posSubtotal;
             final discountPercentage =
@@ -369,20 +385,25 @@ class DashboardPageState extends State<DashboardPage> {
                       const SizedBox(height: 20),
                       const Text('Detail Pesanan F&B:',
                           style: TextStyle(fontWeight: FontWeight.bold)),
+                      // FIX: Tampilkan detail F&B dari varian
                       ...relay.posItems.map((item) {
                         final product = item.product;
+                        final variant = item.selectedVariant;
+                        String itemName = product.name;
+                        if (variant != null) {
+                          itemName += ' (${variant.name})';
+                        }
                         return ListTile(
                           dense: true,
                           contentPadding: EdgeInsets.zero,
-                          title: Text('${item.quantity}x ${product.name}'),
+                          title: Text('${item.quantity}x $itemName'),
                           trailing: Text(_formatCurrency(
-                              (item.selectedVariant?.price ??
-                                      product.sellingPrice) *
-                                  item.quantity)),
+                              (variant?.sellingPrice ?? 0) * item.quantity)),
                         );
                       }),
                     ],
                     const Divider(height: 24, color: Colors.white24),
+                    // ... (sisa dialog tidak berubah)
                     const Text('Metode Pembayaran:',
                         style: TextStyle(fontSize: 12, color: Colors.grey)),
                     ValueListenableBuilder<Box<LocalPaymentMethod>>(
@@ -483,6 +504,7 @@ class DashboardPageState extends State<DashboardPage> {
     );
   }
 
+  // ... (sisa kode _showSetTimerDialog, _addLog, formatters, build, dll tidak berubah)
   Future<void> _showSetTimerDialog(int mejaId) async {
     if (_activeSessions.containsKey(mejaId)) {
       _addLog("Error: Meja $mejaId sudah aktif.");

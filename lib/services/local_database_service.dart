@@ -6,14 +6,13 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
-// Dibiarkan ada sesuai kode asli Anda
 import '../models/local_product.dart';
 import '../models/local_member.dart';
 import '../models/local_supplier.dart';
 import '../models/local_transaction.dart';
 import '../models/local_stock_mutation.dart';
 import '../models/local_payment_method.dart';
-// Import ProductVariant tidak diperlukan di sini karena tidak digunakan secara langsung
+import '../models/product_variant.dart'; // Import ProductVariant
 
 class LocalDatabaseService {
   static const _productsBox = 'products';
@@ -41,8 +40,64 @@ class LocalDatabaseService {
     await Hive.openBox<LocalPaymentMethod>(_paymentMethodsBox);
   }
 
-  // --- SEMUA FUNGSI DI BAWAH INI TETAP SAMA SEPERTI KODE ASLI ANDA ---
+  // --- Product Methods (BAGIAN YANG DIPERBAIKI & DILENGKAPI) ---
+  ValueListenable<Box<LocalProduct>> getProductListenable() =>
+      Hive.box<LocalProduct>(_productsBox).listenable();
+  Future<void> addProduct(LocalProduct product) async =>
+      await Hive.box<LocalProduct>(_productsBox).add(product);
 
+  Future<void> updateProduct(dynamic key, LocalProduct product) async =>
+      await Hive.box<LocalProduct>(_productsBox).put(key, product);
+
+  Future<void> deleteProduct(dynamic key) async =>
+      await Hive.box<LocalProduct>(_productsBox).delete(key);
+
+  LocalProduct? getProductByKey(dynamic key) =>
+      Hive.box<LocalProduct>(_productsBox).get(key);
+
+  // FIX: Fungsi ini sekarang mengupdate stok dan harga beli di dalam varian
+  Future<void> updateVariantStockForPurchase(dynamic productKey,
+      String variantName, int quantity, double newPurchasePrice) async {
+    final box = Hive.box<LocalProduct>(_productsBox);
+    final product = box.get(productKey);
+    if (product != null) {
+      final variantIndex =
+          product.variants.indexWhere((v) => v.name == variantName);
+      if (variantIndex != -1) {
+        product.variants[variantIndex].stock += quantity;
+        product.variants[variantIndex].purchasePrice = newPurchasePrice;
+        await box.put(productKey, product);
+      } else {
+        throw Exception(
+            'Varian "$variantName" tidak ditemukan di produk "${product.name}"');
+      }
+    } else {
+      throw Exception('Produk tidak ditemukan');
+    }
+  }
+
+  // FIX: Fungsi ini sekarang mengurangi stok dari varian spesifik
+  Future<void> decreaseVariantStockForSale(
+      dynamic productKey, ProductVariant variantSold, int quantitySold) async {
+    final box = Hive.box<LocalProduct>(_productsBox);
+    final product = box.get(productKey);
+    if (product != null) {
+      final variantIndex =
+          product.variants.indexWhere((v) => v.name == variantSold.name);
+      if (variantIndex != -1) {
+        product.variants[variantIndex].stock -= quantitySold;
+        await box.put(productKey, product);
+      } else {
+        throw Exception(
+            'Varian "${variantSold.name}" tidak ditemukan di produk "${product.name}"');
+      }
+    } else {
+      throw Exception('Produk tidak ditemukan');
+    }
+  }
+
+  // --- Sisanya tidak perlu diubah ---
+  // ... (salin sisa fungsi dari backupData() sampai akhir)
   Future<String> backupData() async {
     final Map<String, dynamic> allData = {};
     for (var boxName in _allBoxNames) {
@@ -73,7 +128,6 @@ class LocalDatabaseService {
       for (var key in box.keys) {
         final item = box.get(key);
         if (item != null) {
-          // Menggunakan dynamic dispatch untuk memastikan toJson ada
           boxData[key.toString()] = (item as dynamic).toJson();
         }
       }
@@ -168,7 +222,6 @@ class LocalDatabaseService {
     }
   }
 
-  // --- Payment Method Methods (TETAP SAMA) ---
   ValueListenable<Box<LocalPaymentMethod>> getPaymentMethodsListenable() =>
       Hive.box<LocalPaymentMethod>(_paymentMethodsBox).listenable();
   Future<void> addPaymentMethod(LocalPaymentMethod method) async =>
@@ -179,51 +232,6 @@ class LocalDatabaseService {
   Future<void> deletePaymentMethod(dynamic key) async =>
       await Hive.box<LocalPaymentMethod>(_paymentMethodsBox).delete(key);
 
-  // --- Product Methods (BAGIAN YANG DIPERBAIKI & DILENGKAPI) ---
-  ValueListenable<Box<LocalProduct>> getProductListenable() =>
-      Hive.box<LocalProduct>(_productsBox).listenable();
-  Future<void> addProduct(LocalProduct product) async =>
-      await Hive.box<LocalProduct>(_productsBox).add(product);
-
-  // ✅ METHOD UPDATE YANG HILANG, SEKARANG DITAMBAHKAN
-  Future<void> updateProduct(dynamic key, LocalProduct product) async =>
-      await Hive.box<LocalProduct>(_productsBox).put(key, product);
-
-  // ✅ METHOD DELETE YANG HILANG, SEKARANG DITAMBAHKAN
-  Future<void> deleteProduct(dynamic key) async =>
-      await Hive.box<LocalProduct>(_productsBox).delete(key);
-
-  LocalProduct? getProductByKey(dynamic key) =>
-      Hive.box<LocalProduct>(_productsBox).get(key);
-
-  // ✅ FUNGSI UPDATE STOK DISEMPURNAKAN MENGGUNAKAN .put()
-  Future<void> increaseStockForPurchase(
-      dynamic productKey, int quantity, double newPurchasePrice) async {
-    final box = Hive.box<LocalProduct>(_productsBox);
-    final product = box.get(productKey);
-    if (product != null) {
-      product.stock += quantity;
-      product.purchasePrice = newPurchasePrice;
-      await box.put(productKey, product); // Mengganti .save() dengan .put()
-    } else {
-      throw Exception('Produk tidak ditemukan');
-    }
-  }
-
-  // ✅ FUNGSI UPDATE STOK DISEMPURNAKAN MENGGUNAKAN .put()
-  Future<void> decreaseStockForSale(
-      dynamic productKey, int quantitySold) async {
-    final box = Hive.box<LocalProduct>(_productsBox);
-    final product = box.get(productKey);
-    if (product != null) {
-      product.stock -= quantitySold;
-      await box.put(productKey, product); // Mengganti .save() dengan .put()
-    } else {
-      throw Exception('Produk tidak ditemukan');
-    }
-  }
-
-  // --- Member Methods (TETAP SAMA) ---
   ValueListenable<Box<LocalMember>> getMemberListenable() =>
       Hive.box<LocalMember>(_membersBox).listenable();
   Future<void> addMember(LocalMember member) async =>
@@ -233,7 +241,6 @@ class LocalDatabaseService {
   Future<void> deleteMember(dynamic key) async =>
       await Hive.box<LocalMember>(_membersBox).delete(key);
 
-  // --- Supplier Methods (TETAP SAMA) ---
   ValueListenable<Box<LocalSupplier>> getSupplierListenable() =>
       Hive.box<LocalSupplier>(_suppliersBox).listenable();
   Future<void> addSupplier(LocalSupplier supplier) async =>
@@ -243,7 +250,6 @@ class LocalDatabaseService {
   Future<void> deleteSupplier(dynamic key) async =>
       await Hive.box<LocalSupplier>(_suppliersBox).delete(key);
 
-  // --- Transaction Methods (TETAP SAMA) ---
   ValueListenable<Box<LocalTransaction>> getTransactionListenable() =>
       Hive.box<LocalTransaction>(_transactionsBox).listenable();
   Future<void> addTransaction(LocalTransaction transaction) async =>
@@ -261,7 +267,6 @@ class LocalDatabaseService {
     return transactions;
   }
 
-  // --- Stock Mutation Methods (TETAP SAMA) ---
   Future<void> addStockMutation(LocalStockMutation mutation) async =>
       await Hive.box<LocalStockMutation>(_stockMutationsBox).add(mutation);
 

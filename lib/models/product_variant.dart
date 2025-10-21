@@ -1,26 +1,43 @@
+// lib/models/product_variant.dart
+
 import 'package:hive/hive.dart';
 
-part 'product_variant.g.dart'; // Akan digenerate oleh build_runner
+part 'product_variant.g.dart';
 
-// Ganti typeId jika 10 sudah terpakai di model Hive Anda yang lain
 @HiveType(typeId: 10)
 class ProductVariant extends HiveObject {
   @HiveField(0)
-  late String name; // Contoh: "Double Shot", "Less Sugar"
+  String name; // Contoh: "Susu", "Gula Aren"
 
   @HiveField(1)
-  late double price; // Harga untuk varian ini (bukan selisih harga)
+  double purchasePrice;
 
-  ProductVariant({required this.name, required this.price});
+  @HiveField(2)
+  double sellingPrice;
 
-  // Method konversi (opsional tapi praktik yang baik)
+  @HiveField(3)
+  int stock;
+
+  // FIELD 'unit' DIHAPUS DARI SINI
+
+  ProductVariant({
+    required this.name,
+    required this.purchasePrice,
+    required this.sellingPrice,
+    required this.stock,
+  });
+
   Map<String, dynamic> toJson() => {
         'name': name,
-        'price': price,
+        'purchasePrice': purchasePrice,
+        'sellingPrice': sellingPrice,
+        'stock': stock,
       };
 
   factory ProductVariant.fromJson(Map<String, dynamic> json) => ProductVariant(
         name: json['name'],
-        price: (json['price'] as num).toDouble(),
+        purchasePrice: (json['purchasePrice'] as num).toDouble(),
+        sellingPrice: (json['sellingPrice'] as num).toDouble(),
+        stock: json['stock'],
       );
 }

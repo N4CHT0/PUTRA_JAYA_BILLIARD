@@ -18,18 +18,24 @@ class ProductVariantAdapter extends TypeAdapter<ProductVariant> {
     };
     return ProductVariant(
       name: fields[0] as String,
-      price: fields[1] as double,
+      purchasePrice: fields[1] as double,
+      sellingPrice: fields[2] as double,
+      stock: fields[3] as int,
     );
   }
 
   @override
   void write(BinaryWriter writer, ProductVariant obj) {
     writer
-      ..writeByte(2)
+      ..writeByte(4)
       ..writeByte(0)
       ..write(obj.name)
       ..writeByte(1)
-      ..write(obj.price);
+      ..write(obj.purchasePrice)
+      ..writeByte(2)
+      ..write(obj.sellingPrice)
+      ..writeByte(3)
+      ..write(obj.stock);
   }
 
   @override

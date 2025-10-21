@@ -20,22 +20,15 @@ class LocalProductAdapter extends TypeAdapter<LocalProduct> {
       id: fields[0] as String?,
       name: fields[1] as String,
       unit: fields[2] as String,
-      purchasePrice: fields[3] as double,
-      sellingPrice: fields[4] as double,
-      stock: fields[5] as int,
-      isActive: fields[6] as bool,
-
-      // ===== PERBAIKAN KRUSIAL ADA DI SINI =====
-      // Kode ini sekarang aman. Jika fields[7] bernilai null,
-      // ia akan menggunakan list kosong [] sebagai gantinya, sehingga tidak akan crash.
-      variants: (fields[7] as List?)?.cast<ProductVariant>() ?? [],
+      isActive: fields[3] as bool,
+      variants: (fields[4] as List).cast<ProductVariant>(),
     );
   }
 
   @override
   void write(BinaryWriter writer, LocalProduct obj) {
     writer
-      ..writeByte(8)
+      ..writeByte(5)
       ..writeByte(0)
       ..write(obj.id)
       ..writeByte(1)
@@ -43,14 +36,8 @@ class LocalProductAdapter extends TypeAdapter<LocalProduct> {
       ..writeByte(2)
       ..write(obj.unit)
       ..writeByte(3)
-      ..write(obj.purchasePrice)
-      ..writeByte(4)
-      ..write(obj.sellingPrice)
-      ..writeByte(5)
-      ..write(obj.stock)
-      ..writeByte(6)
       ..write(obj.isActive)
-      ..writeByte(7)
+      ..writeByte(4)
       ..write(obj.variants);
   }
 

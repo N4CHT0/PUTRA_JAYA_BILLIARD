@@ -1,25 +1,28 @@
 // lib/pages/stocks/stock_report_page.dart
 
 import 'package:flutter/material.dart';
-import 'package:hive_flutter/hive_flutter.dart'; // Import Hive
+import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
-// Import model LOKAL
 import 'package:putra_jaya_billiard/models/local_product.dart';
-// Import service LOKAL
+import 'package:putra_jaya_billiard/models/product_variant.dart';
 import 'package:putra_jaya_billiard/services/local_database_service.dart';
 
-class StockReportPage extends StatefulWidget {
-  // Hapus kodeOrganisasi
-  // final String kodeOrganisasi;
+// Helper class yang sama seperti di stock opname
+class VariantStockItem {
+  final LocalProduct product;
+  final ProductVariant variant;
 
-  const StockReportPage({super.key}); // Hapus parameter
+  VariantStockItem({required this.product, required this.variant});
+}
+
+class StockReportPage extends StatefulWidget {
+  const StockReportPage({super.key});
 
   @override
   State<StockReportPage> createState() => _StockReportPageState();
 }
 
 class _StockReportPageState extends State<StockReportPage> {
-  // Gunakan service LOKAL
   final LocalDatabaseService _localDbService = LocalDatabaseService();
   String _searchQuery = '';
   final _currencyFormatter =
@@ -38,117 +41,114 @@ class _StockReportPageState extends State<StockReportPage> {
         padding: const EdgeInsets.all(16.0),
         child: Column(
           children: [
-            // Search Bar
             TextField(
               onChanged: (value) {
-                // Trigger rebuild saat search query berubah
                 setState(() {
                   _searchQuery = value.toLowerCase();
                 });
               },
               decoration: InputDecoration(
-                labelText: 'Cari Nama Produk',
+                labelText: 'Cari Nama Produk atau Varian',
                 prefixIcon: const Icon(Icons.search),
                 border:
                     OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
               ),
             ),
             const SizedBox(height: 16),
-            // Tabel Stok (Gunakan ValueListenableBuilder)
             Expanded(
               child: Container(
                 width: double.infinity,
                 decoration: BoxDecoration(
                     color: const Color(0xFF1E1E1E).withOpacity(0.5),
                     borderRadius: BorderRadius.circular(12)),
-                // Gunakan ValueListenableBuilder untuk data produk dari Hive
                 child: ValueListenableBuilder<Box<LocalProduct>>(
                   valueListenable: _localDbService.getProductListenable(),
                   builder: (context, box, _) {
-                    // Filter produk berdasarkan query pencarian di sini
-                    final products = box.values
-                        .where((product) =>
-                            product.name.toLowerCase().contains(_searchQuery))
-                        .toList()
-                        .cast<LocalProduct>();
-
-                    // Urutkan produk berdasarkan nama
-                    products.sort((a, b) =>
-                        a.name.toLowerCase().compareTo(b.name.toLowerCase()));
-
-                    if (products.isEmpty && _searchQuery.isEmpty) {
-                      return const Center(
-                          child: Text(
-                              'Belum ada produk. Tambahkan di Manajemen Produk.'));
-                    } else if (products.isEmpty && _searchQuery.isNotEmpty) {
-                      return Center(
-                          child:
-                              Text('Produk "$_searchQuery" tidak ditemukan.'));
+                    // Ubah data menjadi daftar varian
+                    List<VariantStockItem> allItems = [];
+                    for (var product in box.values) {
+                      for (var variant in product.variants) {
+                        allItems.add(VariantStockItem(
+                            product: product, variant: variant));
+                      }
                     }
 
-                    // Hitung total aset dari produk yang terfilter
-                    double totalAssetValue = products.fold(
+                    final filteredItems = allItems.where((item) {
+                      final productName = item.product.name.toLowerCase();
+                      final variantName = item.variant.name.toLowerCase();
+                      return productName.contains(_searchQuery) ||
+                          variantName.contains(_searchQuery);
+                    }).toList();
+
+                    filteredItems.sort((a, b) =>
+                        '${a.product.name} ${a.variant.name}'
+                            .compareTo('${b.product.name} ${b.variant.name}'));
+
+                    if (filteredItems.isEmpty) {
+                      return const Center(child: Text('Tidak ada produk.'));
+                    }
+
+                    double totalAssetValue = filteredItems.fold(
                         0.0,
-                        (sum, product) =>
-                            sum + (product.stock * product.purchasePrice));
+                        (sum, item) =>
+                            sum +
+                            (item.variant.stock * item.variant.purchasePrice));
 
                     return Column(
                       children: [
                         Expanded(
-                          // Gunakan LayoutBuilder agar SingleChildScrollView tahu batasannya
                           child: LayoutBuilder(builder: (context, constraints) {
                             return SingleChildScrollView(
-                              // Scroll Vertikal
                               child: SingleChildScrollView(
-                                // Scroll Horizontal
                                 scrollDirection: Axis.horizontal,
                                 child: ConstrainedBox(
-                                  // Pastikan DataTable minimal selebar parent
                                   constraints: BoxConstraints(
                                       minWidth: constraints.maxWidth),
                                   child: DataTable(
-                                    columnSpacing: 20, // Sesuaikan jarak kolom
+                                    columnSpacing: 20,
                                     headingRowColor: MaterialStateProperty.all(
                                         Colors.white.withOpacity(0.1)),
                                     columns: const [
-                                      DataColumn(label: Text('Nama Produk')),
+                                      DataColumn(
+                                          label: Text('Nama Produk (Varian)')),
                                       DataColumn(label: Text('Satuan')),
                                       DataColumn(
                                           label: Text('Sisa Stok'),
                                           numeric: true),
                                       DataColumn(
                                           label: Text('Harga Beli'),
-                                          numeric: true), // Tambah Harga Beli
+                                          numeric: true),
                                       DataColumn(
                                           label: Text('Nilai Aset'),
                                           numeric: true),
                                     ],
-                                    rows: products.map((product) {
+                                    rows: filteredItems.map((item) {
+                                      final variant = item.variant;
+                                      final product = item.product;
                                       final assetValue =
-                                          product.stock * product.purchasePrice;
+                                          variant.stock * variant.purchasePrice;
                                       return DataRow(
                                         cells: [
-                                          DataCell(Text(product.name)),
+                                          DataCell(Text(
+                                              '${product.name} (${variant.name})')),
                                           DataCell(Text(product.unit)),
                                           DataCell(
                                             Text(
-                                              product.stock.toString(),
+                                              variant.stock.toString(),
                                               style: TextStyle(
-                                                color: product.stock <= 5
+                                                color: variant.stock <= 5
                                                     ? Colors.redAccent
                                                     : Colors.white,
-                                                fontWeight: product.stock <= 5
+                                                fontWeight: variant.stock <= 5
                                                     ? FontWeight.bold
                                                     : FontWeight.normal,
                                               ),
-                                              textAlign: TextAlign
-                                                  .end, // Align numeric
+                                              textAlign: TextAlign.end,
                                             ),
                                           ),
-                                          // Tampilkan Harga Beli
                                           DataCell(Text(
                                             _currencyFormatter
-                                                .format(product.purchasePrice),
+                                                .format(variant.purchasePrice),
                                             textAlign: TextAlign.end,
                                           )),
                                           DataCell(Text(
@@ -165,7 +165,6 @@ class _StockReportPageState extends State<StockReportPage> {
                             );
                           }),
                         ),
-                        // Tampilkan Total Aset
                         Padding(
                           padding: const EdgeInsets.all(16.0),
                           child: Row(
@@ -176,8 +175,7 @@ class _StockReportPageState extends State<StockReportPage> {
                                 style: Theme.of(context)
                                     .textTheme
                                     .titleLarge
-                                    ?.copyWith(
-                                        fontSize: 18), // Sesuaikan ukuran
+                                    ?.copyWith(fontSize: 18),
                               ),
                               Text(
                                 _currencyFormatter.format(totalAssetValue),
@@ -185,8 +183,7 @@ class _StockReportPageState extends State<StockReportPage> {
                                     .textTheme
                                     .titleLarge
                                     ?.copyWith(
-                                        color: Colors.cyanAccent,
-                                        fontSize: 18), // Sesuaikan ukuran
+                                        color: Colors.cyanAccent, fontSize: 18),
                               ),
                             ],
                           ),
